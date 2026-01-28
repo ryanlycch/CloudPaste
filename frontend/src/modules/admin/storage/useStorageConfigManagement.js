@@ -1,17 +1,32 @@
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { useLocalStorage } from "@vueuse/core";
 import { useAdminBase } from "@/composables/admin-management/useAdminBase.js";
 import { useStorageConfigsStore } from "@/stores/storageConfigsStore.js";
 import { useAdminStorageConfigService } from "@/modules/admin/services/storageConfigService.js";
+import { createLogger } from "@/utils/logger.js";
 
 /**
  * 存储配置管理 composable
  * 提供多存储配置的 CRUD、分页管理、测试等能力
+ * @param {Object} options - 可选配置
+ * @param {Function} options.confirmFn - 确认对话框函数（必需），接收 {title, message, confirmType}，返回 Promise<boolean>
  */
-export function useStorageConfigManagement() {
+export function useStorageConfigManagement(options = {}) {
+  const { confirmFn } = options;
+  if (!confirmFn) {
+    throw new Error("useStorageConfigManagement 必须传入 confirmFn（请在 View 里用 useConfirmDialog + createConfirmFn 创建）");
+  }
+
+  // 国际化
+  const { t } = useI18n();
+  const log = createLogger("StorageConfigManagement");
+
   // 继承基础功能，使用独立的页面标识符
   const base = useAdminBase("storage");
   const storageConfigsStore = useStorageConfigsStore();
-  const { getStorageConfigs, deleteStorageConfig, setDefaultStorageConfig, testStorageConfig } = useAdminStorageConfigService();
+  const { getStorageConfigs, getStorageConfigReveal, deleteStorageConfig, setDefaultStorageConfig, testStorageConfig } =
+    useAdminStorageConfigService();
 
   const STORAGE_TYPE_UNKNOWN = "__UNSPECIFIED__";
 
@@ -19,7 +34,7 @@ export function useStorageConfigManagement() {
     try {
       await storageConfigsStore.refreshConfigs();
     } catch (error) {
-      console.warn("刷新全局存储配置缓存失败", error);
+      log.warn("刷新全局存储配置缓存失败", error);
     }
   };
 
@@ -29,6 +44,10 @@ export function useStorageConfigManagement() {
   const showAddForm = ref(false);
   const showEditForm = ref(false);
   const testResults = ref({});
+
+  // 行级加载状态：正在操作的配置 ID 集合
+  const deletingConfigIds = ref(new Set());
+  const settingDefaultConfigIds = ref(new Set());
 
   const storageTypeFilter = ref("all");
 
@@ -48,16 +67,25 @@ export function useStorageConfigManagement() {
   });
 
   const filteredConfigs = computed(() => {
-    if (storageTypeFilter.value === "all") {
-      return storageConfigs.value;
-    }
-    return storageConfigs.value.filter((config) => normalizeStorageTypeValue(config.storage_type) === storageTypeFilter.value);
+    const filtered = storageTypeFilter.value === "all"
+      ? storageConfigs.value
+      : storageConfigs.value.filter((config) => normalizeStorageTypeValue(config.storage_type) === storageTypeFilter.value);
+
+    // 前端分页：基于筛选结果切片
+    const start = (base.pagination.page - 1) * base.pagination.limit;
+    const end = start + base.pagination.limit;
+    return filtered.slice(start, end);
   });
 
   watch(availableStorageTypes, (types) => {
     if (storageTypeFilter.value !== "all" && !types.includes(storageTypeFilter.value)) {
       storageTypeFilter.value = "all";
     }
+  });
+
+  // 筛选条件变化时重置到第一页
+  watch(storageTypeFilter, () => {
+    base.resetPagination();
   });
 
   // 测试详情模态框状态
@@ -69,17 +97,18 @@ export function useStorageConfigManagement() {
   const pageSizeOptions = [4, 8, 12];
 
   // 重写默认页面大小，默认 4 条记录
+  const storedPageSizes = useLocalStorage("admin-page-size", {});
   const getDefaultPageSize = () => {
     try {
-      const saved = localStorage.getItem("admin-page-size");
-      if (saved) {
-        const pageSizes = JSON.parse(saved);
-        const savedSize = pageSizes["storage"] || 4;
-        // 确保保存的值在分页选项范围内，否则使用默认值4
-        return pageSizeOptions.includes(savedSize) ? savedSize : 4;
-      }
+      const pageSizes = storedPageSizes.value;
+      const savedSize =
+        pageSizes && typeof pageSizes === "object"
+          ? pageSizes["storage"] || 4
+          : 4;
+      // 确保保存的值在分页选项范围内，否则使用默认值 4
+      return pageSizeOptions.includes(savedSize) ? savedSize : 4;
     } catch (error) {
-      console.warn("解析存储配置分页设置失败:", error);
+      log.warn("解析存储配置分页设置失败:", error);
     }
     return 4;
   };
@@ -87,25 +116,51 @@ export function useStorageConfigManagement() {
   // 重新初始化分页状态
   base.pagination.limit = getDefaultPageSize();
 
+  // 筛选后的总数（用于分页）
+  const filteredTotal = computed(() => {
+    const filtered = storageTypeFilter.value === "all"
+      ? storageConfigs.value
+      : storageConfigs.value.filter((config) => normalizeStorageTypeValue(config.storage_type) === storageTypeFilter.value);
+    return filtered.length;
+  });
+
+  // 监听筛选结果变化，更新分页
+  watch([filteredTotal, () => base.pagination.limit], () => {
+    base.updatePagination({ total: filteredTotal.value }, "page");
+  });
+
   /**
    * 加载存储配置列表
+   * @param {Object} options - 可选配置
+   * @param {boolean} options.silent - 是否静默加载（不触发全局 loading 状态）
    */
-  const loadStorageConfigs = async () => {
+  const loadStorageConfigs = async (options = {}) => {
+    const { silent = false } = options;
+
+    // 静默模式：不触发全局 loading，避免 DOM 重新挂载
+    if (silent) {
+      try {
+        const { items } = await getStorageConfigs();
+        storageConfigs.value = items;
+        base.updatePagination({ total: filteredTotal.value }, "page");
+        base.updateLastRefreshTime();
+      } catch (error) {
+        log.error("静默加载存储配置列表失败:", error);
+        throw error;
+      }
+      return;
+    }
+
+    // 非静默模式：触发全局 loading（用于首次加载或手动刷新）
     return await base.withLoading(async () => {
       try {
-        const { items, pagination } = await getStorageConfigs({
-          page: base.pagination.page,
-          limit: base.pagination.limit,
-        });
-
+        const { items } = await getStorageConfigs();
         storageConfigs.value = items;
-        base.updatePagination({ total: pagination.total }, "page");
+        base.updatePagination({ total: filteredTotal.value }, "page");
         base.updateLastRefreshTime();
-        console.log(`存储配置列表加载完成，共 ${items.length} 条`);
       } catch (error) {
-        console.error("加载存储配置列表失败:", error);
+        log.error("加载存储配置列表失败:", error);
         storageConfigs.value = [];
-        // withLoading 会统一处理错误消息，这里只负责状态
         throw error;
       }
     });
@@ -116,49 +171,71 @@ export function useStorageConfigManagement() {
    */
   const handlePageChange = (page) => {
     base.handlePaginationChange(page, "page");
-    loadStorageConfigs();
   };
 
   /**
-   * 处理每页数量变化 - 使用标准方法
+   * 处理每页数量变化
    */
   const handleLimitChange = (newLimit) => {
     base.changePageSize(newLimit);
-    loadStorageConfigs();
   };
 
   /**
-   * 删除存储配置
+   * 删除存储配置（行级加载状态，不影响全局 loading）
    */
   const handleDeleteConfig = async (configId) => {
-    if (!confirm("确定要删除此存储配置吗？此操作不可恢复！")) {
+    const confirmed = await confirmFn({
+      title: t("common.dialogs.deleteTitle"),
+      message: t("common.dialogs.deleteItem", { name: t("admin.storage.item", "此存储配置") }),
+      confirmType: "danger",
+    });
+
+    if (!confirmed) {
       return;
     }
 
-    return await base.withLoading(async () => {
-      try {
-        await deleteStorageConfig(configId);
-        base.showSuccess("删除成功");
-        await loadStorageConfigs();
-        await refreshSharedConfigs();
-      } catch (err) {
-        console.error("删除存储配置失败:", err);
-        if (err.message && err.message.includes("有文件正在使用")) {
-          base.showError(`无法删除此配置：${err.message}`);
-        } else {
-          base.showError(err.message || "删除存储配置失败，请稍后再试");
-        }
+    // 添加到正在删除集合
+    deletingConfigIds.value = new Set([...deletingConfigIds.value, configId]);
+    try {
+      await deleteStorageConfig(configId);
+      base.showSuccess("删除成功");
+      // 静默刷新列表，避免 DOM 重新挂载
+      await loadStorageConfigs({ silent: true });
+      await refreshSharedConfigs();
+    } catch (err) {
+      log.error("删除存储配置失败:", err);
+      if (err.message && err.message.includes("有文件正在使用")) {
+        base.showError(`无法删除此配置：${err.message}`);
+      } else {
+        base.showError(err.message || "删除存储配置失败，请稍后再试");
       }
-    });
+    } finally {
+      // 从正在删除集合中移除
+      const newSet = new Set(deletingConfigIds.value);
+      newSet.delete(configId);
+      deletingConfigIds.value = newSet;
+    }
   };
 
   /**
-   * 编辑配置
+   * 编辑配置（使用 masked 模式加载密钥字段）
    */
-  const editConfig = (config) => {
-    currentConfig.value = { ...config };
-    showEditForm.value = true;
-    showAddForm.value = false;
+  const editConfig = async (config) => {
+    try {
+      // 使用 masked 模式重新加载配置，显示掩码占位符
+      const maskedConfig = await getStorageConfigReveal(config.id, "masked");
+      const finalConfig = maskedConfig?.data || maskedConfig || { ...config };
+
+      currentConfig.value = finalConfig;
+      showEditForm.value = true;
+      showAddForm.value = false;
+    } catch (err) {
+      log.error("加载配置失败:", err);
+      // 降级：使用原始配置
+      currentConfig.value = { ...config };
+      showEditForm.value = true;
+      showAddForm.value = false;
+    }
   };
 
   /**
@@ -181,105 +258,84 @@ export function useStorageConfigManagement() {
   };
 
   /**
-   * 设置默认配置
+   * 设置默认配置（行级加载状态，不影响全局 loading）
    */
   const handleSetDefaultConfig = async (configId) => {
-    return await base.withLoading(async () => {
-      try {
-        await setDefaultStorageConfig(configId);
-        base.showSuccess("设置默认配置成功");
-        await loadStorageConfigs();
-        await refreshSharedConfigs();
-      } catch (err) {
-        console.error("设置默认存储配置失败:", err);
-        base.showError(err.message || "无法设置为默认配置，请稍后再试");
-      }
-    });
+    // 添加到正在设置默认集合
+    settingDefaultConfigIds.value = new Set([...settingDefaultConfigIds.value, configId]);
+    try {
+      await setDefaultStorageConfig(configId);
+      base.showSuccess("设置默认配置成功");
+      // 静默刷新列表，避免 DOM 重新挂载
+      await loadStorageConfigs({ silent: true });
+      await refreshSharedConfigs();
+    } catch (err) {
+      log.error("设置默认存储配置失败:", err);
+      base.showError(err.message || "无法设置为默认配置，请稍后再试");
+    } finally {
+      // 从正在设置默认集合中移除
+      const newSet = new Set(settingDefaultConfigIds.value);
+      newSet.delete(configId);
+      settingDefaultConfigIds.value = newSet;
+    }
   };
 
   /**
    * 测试结果处理器类
    */
   class TestResultProcessor {
-    constructor(result) {
-      this.result = result;
+    constructor(testData) {
+      this.raw = testData || {};
+      this.success = this.raw?.success === true;
+      this.message = typeof this.raw?.message === "string" ? this.raw.message : "";
+
+      const report = this.raw?.report && typeof this.raw.report === "object" ? this.raw.report : null;
+      this.report = report || { version: "", storageType: "", info: {}, checks: [] };
+      this.checks = Array.isArray(this.report.checks) ? this.report.checks : [];
     }
 
     /**
      * 计算测试状态
      */
     calculateStatus() {
-      const basicConnectSuccess = this.result.read?.success === true;
-      const writeSuccess = this.result.write?.success === true;
-      const corsSuccess = this.result.cors?.success === true;
-      const frontendSimSuccess = this.result.frontendSim?.success === true;
-
-      // 完全成功：读写权限都可用、CORS配置正确且前端模拟测试通过
-      const isFullSuccess = basicConnectSuccess && writeSuccess && corsSuccess && frontendSimSuccess;
-      // 部分成功：至少读权限可用
-      const isPartialSuccess = basicConnectSuccess && (!writeSuccess || !corsSuccess || !frontendSimSuccess);
-      // 整体成功状态：至少基础连接成功
-      const isSuccess = basicConnectSuccess;
-
-      return {
-        isFullSuccess,
-        isPartialSuccess,
-        isSuccess,
-      };
+      const isFullSuccess = this.success;
+      const anyOk = this.checks.some((c) => c && c.success === true);
+      const isPartialSuccess = !isFullSuccess && anyOk;
+      const isSuccess = isFullSuccess || isPartialSuccess;
+      return { isFullSuccess, isPartialSuccess, isSuccess };
     }
 
     /**
      * 生成状态消息
      */
     generateStatusMessage() {
+      if (this.message) return this.message;
       const status = this.calculateStatus();
-
-      if (status.isFullSuccess) {
-        return "连接测试完全成功";
-      } else if (status.isPartialSuccess) {
-        return "连接测试部分成功";
-      } else {
-        return "连接测试失败";
-      }
+      if (status.isFullSuccess) return "连接测试成功";
+      if (status.isPartialSuccess) return "连接测试部分成功";
+      return "连接测试失败";
     }
 
     /**
      * 生成简洁的状态消息
      */
     generateDetailsMessage() {
-      const details = [];
-
-      // 读权限状态 - 简洁显示
-      if (this.result.read?.success) {
-        details.push("✓ 读权限正常");
-      } else {
-        details.push("✗ 读权限失败");
-        if (this.result.read?.error) {
-          details.push(`  ${this.result.read.error.split("\n")[0]}`);
+      const lines = [];
+      for (const c of this.checks) {
+        if (!c) continue;
+        const label = c.label || c.key || "检查项";
+        if (c.skipped) {
+          lines.push(`✓ ${label}（已跳过）`);
+          continue;
+        }
+        if (c.success) {
+          lines.push(`✓ ${label} 正常`);
+        } else {
+          lines.push(`✗ ${label} 失败`);
+          if (c.error) lines.push(`  ${String(c.error).split("\n")[0]}`);
         }
       }
-
-      // 写权限状态 - 简洁显示
-      if (this.result.write?.success) {
-        details.push("✓ 写权限正常");
-      } else {
-        details.push("✗ 写权限失败");
-        if (this.result.write?.error) {
-          details.push(`  ${this.result.write.error.split("\n")[0]}`);
-        }
-      }
-
-      // CORS配置状态 - 简洁显示
-      if (this.result.cors?.success) {
-        details.push("✓ CORS配置正确");
-      } else {
-        details.push("✗ CORS配置有问题");
-        if (this.result.cors?.error) {
-          details.push(`  ${this.result.cors.error.split("\n")[0]}`);
-        }
-      }
-
-      return details.join("\n");
+      return lines.join("\n");
     }
   }
 
@@ -289,10 +345,10 @@ export function useStorageConfigManagement() {
   const testConnection = async (configId) => {
     try {
       testResults.value[configId] = { loading: true };
-      const result = await testStorageConfig(configId);
+      const data = await testStorageConfig(configId);
 
       // 使用测试结果处理器
-      const processor = new TestResultProcessor(result || {});
+      const processor = new TestResultProcessor(data || {});
       const status = processor.calculateStatus();
 
       testResults.value[configId] = {
@@ -300,7 +356,7 @@ export function useStorageConfigManagement() {
         partialSuccess: status.isPartialSuccess,
         message: processor.generateStatusMessage(),
         details: processor.generateDetailsMessage(),
-        result: result || {},
+        report: processor.report || null,
         loading: false,
       };
     } catch (err) {
@@ -324,21 +380,17 @@ export function useStorageConfigManagement() {
   };
 
   /**
-   * 获取提供商图标
+   * 判断配置是否正在删除
    */
-  const getProviderIcon = (providerType) => {
-    switch (providerType) {
-      case "Cloudflare R2":
-        return "M11 16.5l11 7v-14.5m-11 7.5v-13l-11 6.5 11 6.5z";
-      case "Backblaze B2":
-        return "M4 4v16a2 2 0 002 2h12a2 2 0 002-2V8.342a2 2 0 00-.602-1.43l-4.44-4.342A2 2 0 0013.56 2H6a2 2 0 00-2 2zm5 9v-3a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1z";
-      case "AWS S3":
-        return "M5 16.577l2.194-2.195 2.194 2.195L5 20.772l-4.388-4.195 2.194-2.195 2.194 2.195zM5 4.822l2.194 2.195L5 9.211 2.806 7.017 5 4.822zM12 0l2.194 2.195L12 4.389 9.806 2.195 12 0zM5 11.211l2.194 2.195-2.194 2.194-2.194-2.194L5 11.211zM12 7.017l4.389-4.195 4.388 4.195-4.388 4.194-4.389-4.194z";
-      case "Aliyun OSS":
-        return "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z";
-      default:
-        return "M3 19h18a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z";
-    }
+  const isConfigDeleting = (configId) => {
+    return deletingConfigIds.value.has(configId);
+  };
+
+  /**
+   * 判断配置是否正在设置为默认
+   */
+  const isConfigSettingDefault = (configId) => {
+    return settingDefaultConfigIds.value.has(configId);
   };
 
   return {
@@ -361,6 +413,12 @@ export function useStorageConfigManagement() {
     selectedTestResult,
     showDetailedResults,
 
+    // 行级加载状态
+    deletingConfigIds,
+    settingDefaultConfigIds,
+    isConfigDeleting,
+    isConfigSettingDefault,
+
     // 存储配置管理方法
     loadStorageConfigs,
     handlePageChange,
@@ -376,7 +434,6 @@ export function useStorageConfigManagement() {
     showTestDetailsModal,
 
     // 工具方法
-    getProviderIcon,
     normalizeStorageTypeValue,
     STORAGE_TYPE_UNKNOWN,
   };

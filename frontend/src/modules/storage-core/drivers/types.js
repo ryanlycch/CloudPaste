@@ -6,7 +6,8 @@
 // types.
 
 export const STORAGE_STRATEGIES = Object.freeze({
-  S3_BACKEND_DIRECT: "s3Backend-direct",
+  BACKEND_STREAM: "backend-stream",
+  BACKEND_FORM: "backend-form",
   PRESIGNED_SINGLE: "presigned-single",
   PRESIGNED_MULTIPART: "presigned-multipart",
 });
@@ -20,15 +21,27 @@ export const DRIVER_TYPES = Object.freeze({
   S3: "S3",
   WEBDAV: "WEBDAV",
   LOCAL: "LOCAL",
+  ONEDRIVE: "ONEDRIVE",
+  GOOGLE_DRIVE: "GOOGLE_DRIVE",
+  GITHUB_RELEASES: "GITHUB_RELEASES",
+  GITHUB_API: "GITHUB_API",
+  TELEGRAM: "TELEGRAM",
+  DISCORD: "DISCORD",
+  HUGGINGFACE_DATASETS: "HUGGINGFACE_DATASETS",
 });
 
 export const DEFAULT_DRIVER_CAPABILITIES = Object.freeze({
   share: {
-    direct: false,
+    // 后端中转上传能力：流式与表单两种
+    backendStream: false,
+    backendForm: false,
+    presigned: false,
     url: false,
   },
   fs: {
-    backendDirect: false,
+    // 文件系统挂载页：后端中转上传能力
+    backendStream: false,
+    backendForm: false,
     presignedSingle: false,
     multipart: false,
   },

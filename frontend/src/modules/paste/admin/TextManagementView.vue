@@ -1,6 +1,11 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { onMounted } from "vue";
+import { useI18n } from "vue-i18n";
 import { usePasteManagement } from "@/modules/paste";
+import { useThemeMode } from "@/composables/core/useThemeMode.js";
+import { useCreatorBadge } from "@/composables/admin-management/useCreatorBadge.js";
+import { useConfirmDialog, createConfirmFn } from "@/composables/core/useConfirmDialog.js";
+import { IconClock, IconDelete, IconRefresh } from "@/components/icons";
 
 // 导入子组件
 import PasteTable from "@/modules/paste/admin/components/PasteTable.vue";
@@ -11,16 +16,28 @@ import PasteEditModal from "@/modules/paste/admin/components/PasteEditModal.vue"
 import CommonPagination from "@/components/common/CommonPagination.vue";
 import QRCodeModal from "@/modules/fileshare/admin/components/QRCodeModal.vue";
 import GlobalSearchBox from "@/components/common/GlobalSearchBox.vue";
+import ConfirmDialog from "@/components/common/dialogs/ConfirmDialog.vue";
+import ViewModeToggle from "@/components/common/ViewModeToggle.vue";
 
 /**
- * 组件接收的属性定义
- * darkMode: 主题模式
+ * 使用主题模式 composable
  */
-const props = defineProps({
-  darkMode: {
-    type: Boolean,
-    required: true,
-  },
+const { isDarkMode: darkMode } = useThemeMode();
+
+// 国际化
+const { t } = useI18n();
+
+// 创建者徽章统一逻辑
+const { formatCreator } = useCreatorBadge();
+
+// 确认对话框
+const { dialogState, confirm, handleConfirm, handleCancel } = useConfirmDialog();
+
+// 创建适配确认函数，用于传递给 composable
+const confirmFn = createConfirmFn(confirm, {
+  t,
+  darkMode,
+  getConfirmText: ({ confirmType }) => (confirmType === "warning" ? t("common.dialogs.cleanupButton") : t("common.dialogs.deleteButton")),
 });
 
 // 使用文本管理composable
@@ -43,6 +60,10 @@ const {
   copiedTexts,
   copiedRawTexts,
 
+  // 视图模式
+  viewMode,
+  switchViewMode,
+
   // 权限状态
   isAdmin,
   isApiKeyUser,
@@ -50,9 +71,15 @@ const {
 
   // 方法
   loadPastes,
-  searchPastes,
+  refreshPastes,
   handleOffsetChange,
-  changePageSize,
+  searchQuery,
+  isSearchMode,
+  searchLoading,
+  handleGlobalSearch,
+  clearSearch,
+  handleOffsetChangeWithSearch,
+  handlePageSizeChange,
   deletePaste,
   batchDeletePastes,
   clearExpiredPastes,
@@ -70,164 +97,20 @@ const {
   toggleSelectAll,
   toggleVisibility,
   clearSelection,
-} = usePasteManagement();
+} = usePasteManagement({ confirmFn });
 
 // 别名映射，用于模板中的方法调用
 const goToPage = handleOffsetChange;
 const deleteSelectedPastes = batchDeletePastes;
 
-// 全局搜索状态
-const globalSearchValue = ref("");
-
-// 搜索状态
-const isSearchMode = ref(false);
-const searchResults = ref([]);
-const searchLoading = ref(false);
-
-// 视图模式状态 ('table' | 'masonry')
-const VIEW_MODE_KEY = "paste-admin-view-mode";
-const viewMode = ref(localStorage.getItem(VIEW_MODE_KEY) || "table");
-
-/**
- * 切换视图模式
- * @param {string} mode - 视图模式 ('table' | 'masonry')
- */
-const switchViewMode = (mode) => {
-  viewMode.value = mode;
-  localStorage.setItem(VIEW_MODE_KEY, mode);
-  console.log(`视图模式已切换至: ${mode}`);
-};
-
-// 搜索处理函数 - 使用服务端搜索
-const handleGlobalSearch = async (searchValue) => {
-  globalSearchValue.value = searchValue;
-
-  if (!searchValue || searchValue.trim().length < 2) {
-    // 清除搜索，立即回到正常分页模式
-    isSearchMode.value = false;
-    searchResults.value = [];
-    // 立即重新加载原始数据
-    await loadPastes();
-    console.log("搜索已清除，恢复到原始列表");
-    return;
-  }
-
-  try {
-    searchLoading.value = true;
-    isSearchMode.value = true;
-
-    // 重置分页到第一页进行搜索（offset模式，第一页是offset=0）
-    const result = await searchPastes(searchValue.trim(), 0);
-
-    if (result && result.results) {
-      // 搜索模式下，直接更新主要的pastes状态和分页信息
-      pastes.value = result.results;
-      // 更新分页信息 - 改为offset模式
-      if (result.pagination) {
-        pagination.total = result.pagination.total;
-        pagination.offset = result.pagination.offset || 0;
-        pagination.hasMore = result.pagination.hasMore !== undefined ? result.pagination.hasMore : pagination.offset + pagination.limit < pagination.total;
-      }
-      console.log(`文本搜索完成: "${searchValue}", 找到 ${result.pagination?.total || result.results.length} 个结果`);
-    } else {
-      pastes.value = [];
-      pagination.total = 0;
-      pagination.offset = 0;
-      pagination.hasMore = false;
-    }
-  } catch (error) {
-    console.error("文本搜索失败:", error);
-    pastes.value = [];
-    pagination.total = 0;
-    pagination.offset = 0;
-    pagination.hasMore = false;
-  } finally {
-    searchLoading.value = false;
-  }
-};
-
-const clearGlobalSearch = async () => {
-  globalSearchValue.value = "";
-  isSearchMode.value = false;
-  searchResults.value = [];
-
-  // 立即重新加载正常的文本列表
-  try {
-    await loadPastes();
-    console.log("清除文本搜索，已恢复到原始列表");
-  } catch (error) {
-    console.error("清除搜索后重新加载失败:", error);
-  }
-};
-
-// 处理分页变化（支持搜索模式）- 改为offset模式
-const handleOffsetChangeWithSearch = async (newOffset) => {
-  if (isSearchMode.value && globalSearchValue.value) {
-    // 搜索模式下的分页
-    try {
-      searchLoading.value = true;
-      const result = await searchPastes(globalSearchValue.value, newOffset);
-
-      if (result && result.results) {
-        pastes.value = result.results;
-        // 更新分页信息
-        if (result.pagination) {
-          pagination.total = result.pagination.total;
-          pagination.offset = result.pagination.offset || newOffset;
-          pagination.hasMore = result.pagination.hasMore !== undefined ? result.pagination.hasMore : pagination.offset + pagination.limit < pagination.total;
-        }
-      }
-    } catch (error) {
-      console.error("搜索分页失败:", error);
-    } finally {
-      searchLoading.value = false;
-    }
-  } else {
-    // 正常模式下的分页
-    handleOffsetChange(newOffset);
-  }
-};
-
-// 处理每页数量变化
-const handlePageSizeChange = (newPageSize) => {
-  changePageSize(newPageSize);
-  // 如果在搜索模式，重新搜索
-  if (isSearchMode.value && globalSearchValue.value) {
-    handleGlobalSearch(globalSearchValue.value);
-  } else {
-    // 否则重新加载文本列表
-    loadPastes();
-  }
-};
-
-// 格式化创建者信息的工具函数
-const formatCreator = (paste) => {
-  if (!paste.created_by) {
-    return "系统";
-  }
-
-  // 处理API密钥创建者
-  if (paste.created_by.startsWith("apikey:")) {
-    const keyPart = paste.created_by.substring(7); // 移除"apikey:"前缀
-    return `API密钥 (${keyPart})`;
-  }
-
-  // 处理UUID格式的创建者
-  if (paste.created_by.length === 36 && paste.created_by.includes("-")) {
-    return `用户 (${paste.created_by.substring(0, 8)})`;
-  }
-
-  return paste.created_by;
-};
+// 视图模式选项配置
+const viewModeOptions = [
+  { value: "table", icon: "table", title: "表格视图" },
+  { value: "masonry", icon: "masonry", title: "瀑布流视图" },
+];
 
 // 组件挂载时加载数据
 onMounted(() => {
-  console.log("TextManagement组件挂载");
-  console.log("TextManagement权限状态检查", {
-    isAdmin: isAdmin.value,
-    isApiKeyUser: isApiKeyUser.value,
-  });
-
   // 加载分享列表
   loadPastes();
 });
@@ -242,112 +125,32 @@ onMounted(() => {
         <h2 class="text-lg sm:text-xl font-medium" :class="darkMode ? 'text-white' : 'text-gray-900'">文本管理</h2>
 
         <div class="flex items-center space-x-2">
-          <!-- 视图模式切换按钮组 - 桌面端(表格/瀑布流) -->
-          <div class="hidden md:flex items-center rounded-md shadow-sm" role="group">
-            <!-- 表格视图按钮 -->
-            <button
-              type="button"
-              :class="[
-                'inline-flex items-center justify-center px-3 py-2 text-sm font-medium border focus:z-10 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-l-md',
-                viewMode === 'table'
-                  ? 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
-                  : darkMode
-                  ? 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
-              ]"
-              @click="switchViewMode('table')"
-              title="表格视图"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-
-            <!-- 瀑布流视图按钮 -->
-            <button
-              type="button"
-              :class="[
-                'inline-flex items-center justify-center px-3 py-2 text-sm font-medium border focus:z-10 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-r-md',
-                viewMode === 'masonry'
-                  ? 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
-                  : darkMode
-                  ? 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
-              ]"
-              @click="switchViewMode('masonry')"
-              title="瀑布流视图"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-              </svg>
-            </button>
-          </div>
-
-          <!-- 视图模式切换按钮组 - 移动端(列表/瀑布流) -->
-          <div class="md:hidden flex items-center rounded-md shadow-sm" role="group">
-            <!-- 列表视图按钮 -->
-            <button
-              type="button"
-              :class="[
-                'inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium border focus:z-10 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-l-md',
-                viewMode === 'table'
-                  ? 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
-                  : darkMode
-                  ? 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
-              ]"
-              @click="switchViewMode('table')"
-              title="列表视图"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-
-            <!-- 瀑布流视图按钮 -->
-            <button
-              type="button"
-              :class="[
-                'inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium border focus:z-10 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-r-md',
-                viewMode === 'masonry'
-                  ? 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
-                  : darkMode
-                  ? 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
-              ]"
-              @click="switchViewMode('masonry')"
-              title="瀑布流视图"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-              </svg>
-            </button>
-          </div>
+          <!-- 视图模式切换按钮组 - 移动端 -->
+          <ViewModeToggle
+            v-model="viewMode"
+            :options="viewModeOptions"
+            :dark-mode="darkMode"
+            size="sm"
+            class="md:hidden"
+          />
+          <!-- 视图模式切换按钮组 - 桌面端 -->
+          <ViewModeToggle
+            v-model="viewMode"
+            :options="viewModeOptions"
+            :dark-mode="darkMode"
+            size="md"
+            class="hidden md:inline-flex"
+          />
 
           <!-- 刷新按钮 - 在所有屏幕尺寸显示 -->
           <button
             class="inline-flex items-center px-2 py-1 sm:px-3 sm:py-1.5 md:px-4 md:py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-            @click="loadPastes"
-            :disabled="loading"
+            @click="refreshPastes"
+            :disabled="loading || searchLoading"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" :class="['h-3 w-3 sm:h-4 sm:w-4 mr-1', loading ? 'animate-spin' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                v-if="!loading"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-              <circle v-if="loading" class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path
-                v-if="loading"
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            <span class="hidden xs:inline">{{ loading ? "刷新中..." : "刷新" }}</span>
-            <span class="xs:hidden">{{ loading ? "..." : "刷" }}</span>
+            <IconRefresh class="h-3 w-3 sm:h-4 sm:w-4 mr-1" :class="loading || searchLoading ? 'animate-spin' : ''" />
+            <span class="hidden xs:inline">{{ loading || searchLoading ? "刷新中..." : "刷新" }}</span>
+            <span class="xs:hidden">{{ loading || searchLoading ? "..." : "刷" }}</span>
           </button>
         </div>
       </div>
@@ -355,14 +158,14 @@ onMounted(() => {
       <!-- 搜索框 -->
       <div class="w-full">
         <GlobalSearchBox
-          v-model="globalSearchValue"
+          v-model="searchQuery"
           placeholder="搜索文本分享（支持链接、备注、内容）"
           :show-hint="true"
           search-hint="服务端搜索，支持模糊匹配"
           size="md"
           :debounce-ms="300"
           @search="handleGlobalSearch"
-          @clear="clearGlobalSearch"
+          @clear="clearSearch"
         />
       </div>
 
@@ -374,14 +177,7 @@ onMounted(() => {
           @click="clearExpiredPastes"
           title="系统会自动删除过期内容，但您也可以通过此功能手动立即清理"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 sm:h-4 sm:w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
+          <IconDelete class="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
           <span class="hidden xs:inline">清理过期</span>
           <span class="xs:hidden">清理</span>
         </button>
@@ -395,14 +191,7 @@ onMounted(() => {
           ]"
           @click="deleteSelectedPastes"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 sm:h-4 sm:w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
+          <IconDelete class="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
           <span class="hidden xs:inline">批量删除{{ selectedPastes.length ? `(${selectedPastes.length})` : "" }}</span>
           <span class="xs:hidden">删除{{ selectedPastes.length ? `(${selectedPastes.length})` : "" }}</span>
         </button>
@@ -413,16 +202,14 @@ onMounted(() => {
     <div class="flex justify-between items-center mb-2 sm:mb-3" v-if="lastRefreshTime">
       <div class="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
         <span class="inline-flex items-center">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 sm:h-4 sm:w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <IconClock class="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
           上次刷新: {{ lastRefreshTime }}
         </span>
       </div>
     </div>
 
     <!-- 数据展示区域 -->
-    <div class="overflow-hidden bg-white dark:bg-gray-800 shadow-md rounded-lg flex-1">
+    <div class="overflow-visible bg-white dark:bg-gray-800 shadow-md rounded-lg flex-1">
       <div class="flex flex-col h-full">
         <!-- 桌面端 - 表格视图 (中等及以上设备显示) -->
         <div v-if="viewMode === 'table'" class="hidden md:block flex-1 overflow-auto">
@@ -447,7 +234,7 @@ onMounted(() => {
         </div>
 
         <!-- 桌面端 - 瀑布流视图 (中等及以上设备显示) -->
-        <div v-if="viewMode === 'masonry'" class="hidden md:block flex-1 overflow-auto">
+        <div v-if="viewMode === 'masonry'" class="hidden md:block flex-1 overflow-visible">
           <PasteMasonryView
             :dark-mode="darkMode"
             :pastes="pastes"
@@ -489,7 +276,7 @@ onMounted(() => {
         </div>
 
         <!-- 移动端 - 瀑布流视图 (小于中等设备显示) -->
-        <div v-if="viewMode === 'masonry'" class="md:hidden flex-1 overflow-auto">
+        <div v-if="viewMode === 'masonry'" class="md:hidden flex-1 overflow-visible">
           <PasteMasonryView
             :dark-mode="darkMode"
             :pastes="pastes"
@@ -519,7 +306,7 @@ onMounted(() => {
         :pagination="pagination"
         :page-size-options="pageSizeOptions"
         :search-mode="isSearchMode"
-        :search-term="globalSearchValue"
+        :search-term="searchQuery"
         mode="offset"
         @offset-changed="handleOffsetChangeWithSearch"
         @limit-changed="handlePageSizeChange"
@@ -542,5 +329,12 @@ onMounted(() => {
 
     <!-- 二维码弹窗组件 -->
     <QRCodeModal v-if="showQRCodeModal" :qr-code-url="qrCodeDataURL" :file-slug="qrCodeSlug" :dark-mode="darkMode" @close="showQRCodeModal = false" />
+
+    <!-- 确认对话框 -->
+    <ConfirmDialog
+      v-bind="dialogState"
+      @confirm="handleConfirm"
+      @cancel="handleCancel"
+    />
   </div>
 </template>

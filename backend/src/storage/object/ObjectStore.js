@@ -10,6 +10,8 @@ import { shouldUseRandomSuffix, getFileNameAndExt, generateShortId } from "../..
 import { ValidationError, NotFoundError } from "../../http/errors.js";
 import { ApiStatus } from "../../constants/index.js";
 import { PathPolicy } from "../../services/share/PathPolicy.js";
+import { resolveStorageLinks } from "./ObjectLinkStrategy.js";
+import { CAPABILITIES } from "../interfaces/capabilities/index.js";
 
 export class ObjectStore {
   constructor(db, encryptionSecret, repositoryFactory) {
@@ -37,11 +39,28 @@ export class ObjectStore {
   }
 
   async _composeKeyWithStrategy(storageConfig, directory, filename) {
+    // 统一约定：storage_config.default_folder 仅作为“文件上传页/分享上传”的默认目录前缀；
+    // 重要约定：directory 只能是“目录”，不要把文件名也塞进来。
+    // 否则会生成类似 a/file.txt/file.txt 的错误路径，后续下载会 404。
+    const normalizedDir = PathPolicy.normalizeFragment(directory);
+    const normalizedFilename = PathPolicy.normalizeFragment(filename);
+    if (normalizedDir && normalizedFilename) {
+      const segs = normalizedDir.split("/").filter(Boolean);
+      if (segs.length && segs[segs.length - 1] === normalizedFilename) {
+        throw new ValidationError(
+          `directory 参数只能填目录（不要包含文件名）。收到: directory="${directory}", filename="${filename}"`,
+        );
+      }
+    }
+
     const dir = PathPolicy.composeDirectory(storageConfig.default_folder, directory);
     let key = dir ? `${dir}/${filename}` : filename;
 
     // 命名策略：随机后缀模式时，如发生冲突，则为对象Key加短ID后缀（DB层冲突检测）
     try {
+      // 无 db 时无法读取系统设置
+      if (!this.db) return key;
+
       const useRandom = await shouldUseRandomSuffix(this.db).catch(() => false);
       if (useRandom) {
         const fileRepo = this.repositoryFactory.getFileRepository();
@@ -65,7 +84,7 @@ export class ObjectStore {
     return await this._composeKeyWithStrategy(storageConfig, directory, filename);
   }
 
-  async presignUpload({ storage_config_id, directory, filename, fileSize, contentType }) {
+  async presignUpload({ storage_config_id, directory, filename, fileSize, contentType, sha256 = null }) {
     const storageConfig = await this._getStorageConfig(storage_config_id);
     if (!storageConfig.storage_type) {
       throw new ValidationError("存储配置缺少 storage_type");
@@ -73,10 +92,17 @@ export class ObjectStore {
     const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, this.encryptionSecret);
 
     const key = await this._composeKeyWithStrategy(storageConfig, directory, filename);
-    const presign = await driver.uploadOps.generatePresignedUploadUrl(key, {
+    if (typeof driver.generateUploadUrl !== "function" || (typeof driver.hasCapability === "function" && !driver.hasCapability(CAPABILITIES.DIRECT_LINK))) {
+      throw new ValidationError("当前存储驱动不支持预签名上传");
+    }
+
+    const presign = await driver.generateUploadUrl(key, {
+      path: key,
+      subPath: key,
       fileName: filename,
       fileSize,
-      // contentType 由 uploadOps 基于 fileName 推断，传与不传均可
+      contentType,
+      sha256: sha256 || undefined,
     });
 
     return {
@@ -87,22 +113,38 @@ export class ObjectStore {
       expiresIn: presign.expiresIn,
       storage_config_id,
       provider_type: storageConfig.provider_type,
+      headers: presign.headers || undefined,
+      sha256: presign.sha256 || sha256 || undefined,
+      skipUpload: presign.skipUpload === true ? true : undefined,
     };
   }
 
-  async uploadDirect({ storage_config_id, directory, filename, bodyStream, size, contentType }) {
+  async uploadDirect({ storage_config_id, directory, filename, bodyStream, size, contentType, uploadId = null, userIdOrInfo = null, userType = null }) {
     const storageConfig = await this._getStorageConfig(storage_config_id);
     if (!storageConfig.storage_type) {
       throw new ValidationError("存储配置缺少 storage_type");
     }
     const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, this.encryptionSecret);
 
+    // 仅允许具备写入能力且支持文件上传的驱动使用 upload-direct
+    if (typeof driver.hasCapability === "function" && !driver.hasCapability(CAPABILITIES.WRITER)) {
+      throw new ValidationError("当前存储驱动不具备写入能力，无法使用 upload-direct 接口");
+    }
+    if (typeof driver.uploadFile !== "function") {
+      throw new ValidationError("当前存储驱动不支持文件直传");
+    }
+
     const key = await this._composeKeyWithStrategy(storageConfig, directory, filename);
-    const result = await driver.uploadOps.uploadStream(key, bodyStream, {
-      filename,
+
+    const result = await driver.uploadFile(key, /** @type {any} */ (bodyStream), {
+      path: key,
+      subPath: key,
+      db: this.db,
       contentType,
       contentLength: size,
-      useMultipart: false,
+      uploadId: uploadId || undefined,
+      userIdOrInfo,
+      userType,
     });
 
     // 触发与存储配置相关的缓存失效（清理URL缓存，联动关联挂载目录缓存）
@@ -120,9 +162,94 @@ export class ObjectStore {
     };
   }
 
-  async commitUpload({ storage_config_id, key, filename, size, etag }) {
-    // 对象存储提交阶段无需再与 S3 交互（驱动在直传/预签名 PUT 阶段已完成写入）
-    // 这里仅将必要信息汇总给上层记录建档
+  /**
+   * 基于 File/Blob 的统一上传（用于分享上传，多存储通用，默认按“表单上传”语义处理）
+   * @param {Object} params
+   * @param {string} params.storage_config_id
+   * @param {string|null} params.directory
+   * @param {string} params.filename
+   * @param {File|Blob|ArrayBuffer|Uint8Array|Buffer|string} params.file
+   * @param {number} params.size
+   * @param {string|null} params.contentType
+   */
+  async uploadFileForShare({ storage_config_id, directory, filename, file, size, contentType, uploadId = null, userIdOrInfo = null, userType = null }) {
+    const storageConfig = await this._getStorageConfig(storage_config_id);
+    if (!storageConfig.storage_type) {
+      throw new ValidationError("存储配置缺少 storage_type");
+    }
+    const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, this.encryptionSecret);
+
+    if (typeof driver.hasCapability === "function" && !driver.hasCapability(CAPABILITIES.WRITER)) {
+      throw new ValidationError("当前存储驱动不具备写入能力");
+    }
+    if (typeof driver.uploadFile !== "function") {
+      throw new ValidationError("当前存储驱动不支持文件上传");
+    }
+
+    const key = await this._composeKeyWithStrategy(storageConfig, directory, filename);
+
+    // 分享上传通过 /share/upload 走表单(multipart)通道，这里保持 File/Blob 语义，交由驱动走表单上传路径
+    const result = await driver.uploadFile(key, file, {
+      path: key,
+      subPath: key,
+      db: this.db,
+      contentType: contentType || undefined,
+      contentLength: size,
+      uploadId: uploadId || undefined,
+      userIdOrInfo,
+      userType,
+    });
+
+    try {
+      invalidateFsCache({ storageConfigId: storage_config_id, reason: "upload-share-file", db: this.db });
+    } catch {}
+
+    return {
+      key,
+      storagePath: result.storagePath || key,
+      publicUrl: result.publicUrl || null,
+      etag: result.etag || null,
+      contentType: result.contentType || contentType,
+      storage_config_id,
+    };
+  }
+
+  async commitUpload({ storage_config_id, key, filename, size, etag, sha256 = null, contentType = null }) {
+    // 对象存储提交阶段：
+    // 大部分驱动（S3 等）：无需再与云端交互（直传/预签名 PUT 已完成写入），这里只做建档
+    // 少数驱动（HuggingFace 等）：还需要一次“登记/提交”，让仓库树里能看见文件
+    let uploadResult = {
+      storagePath: key,
+      publicUrl: null,
+      etag: etag || null,
+    };
+
+    const storageConfig = await this._getStorageConfig(storage_config_id);
+    if (!storageConfig?.storage_type) {
+      throw new ValidationError("存储配置缺少 storage_type");
+    }
+
+    const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, this.encryptionSecret);
+
+    if (typeof driver.handleUploadComplete === "function") {
+      const result = await driver.handleUploadComplete(key, {
+        path: key,
+        subPath: key,
+        db: this.db,
+        fileName: filename,
+        fileSize: Number(size) || 0,
+        contentType: contentType || undefined,
+        etag: etag || undefined,
+        sha256: sha256 || undefined,
+      });
+
+      uploadResult = {
+        storagePath: result?.storagePath || key,
+        publicUrl: result?.publicUrl || null,
+        etag: etag || null,
+      };
+    }
+
     // 通知缓存失效（上传完成）
     try {
       invalidateFsCache({ storageConfigId: storage_config_id, reason: "upload-complete", db: this.db });
@@ -130,15 +257,85 @@ export class ObjectStore {
 
     return {
       key,
-      uploadResult: {
-        storagePath: key,
-        publicUrl: null,
-        etag: etag || null,
-      },
+      uploadResult,
       filename,
       size: Number(size) || 0,
       storage_config_id,
     };
+  }
+
+  // 生成预览/下载链接（storage-first 场景）
+  async generateLinksByStoragePath(storage_config_id, key, options = {}) {
+    const storageConfig = await this._getStorageConfig(storage_config_id);
+    if (!storageConfig.storage_type) {
+      throw new ValidationError("存储配置缺少 storage_type");
+    }
+    const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, this.encryptionSecret);
+
+    const links = await resolveStorageLinks({
+      driver,
+      storageConfig,
+      path: key,
+      request: options.request || null,
+      forceDownload: options.forceDownload || false,
+      userType: options.userType || null,
+      userId: options.userId || null,
+    });
+
+    return {
+      preview: links.preview,
+      download: links.download,
+      proxyPolicy: links.proxyPolicy || null,
+    };
+  }
+
+  /**
+   * 按存储路径进行真实文件下载代理
+   * - storage-first 视图下的“本机代理”能力
+   * - 封装 driver 初始化与 downloadFile 调用，供分享层复用
+   */
+  async downloadByStoragePath(storage_config_id, key, options = {}) {
+    const storageConfig = await this._getStorageConfig(storage_config_id);
+    if (!storageConfig.storage_type) {
+      throw new ValidationError("存储配置缺少 storage_type");
+    }
+    const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, this.encryptionSecret);
+
+    if (typeof driver.downloadFile !== "function") {
+      throw new ValidationError("当前驱动不支持按存储路径下载");
+    }
+
+    const request = options.request || null;
+
+    return await driver.downloadFile(key, {
+      path: key,
+      subPath: key,
+      db: this.db,
+      request,
+    });
+  }
+
+  // 删除存储对象（storage-first）
+  async deleteByStoragePath(storage_config_id, key, options = {}) {
+    const storageConfig = await this._getStorageConfig(storage_config_id);
+    if (!storageConfig.storage_type) {
+      throw new ValidationError("存储配置缺少 storage_type");
+    }
+    const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, this.encryptionSecret);
+
+    if (typeof driver.deleteObjectByStoragePath === "function") {
+      await driver.deleteObjectByStoragePath(key, options);
+      invalidateFsCache({ storageConfigId: storage_config_id, reason: "delete-object", db: this.db });
+      return { success: true };
+    }
+
+    if (typeof driver.batchRemoveItems === "function") {
+      await driver.batchRemoveItems([key], { paths: [key], subPaths: [key], db: this.db, ...options });
+      invalidateFsCache({ storageConfigId: storage_config_id, reason: "delete-object", db: this.db });
+      return { success: true };
+    }
+
+    throw new ValidationError("当前驱动不支持按存储路径删除");
   }
 }
 

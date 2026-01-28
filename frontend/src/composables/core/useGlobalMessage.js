@@ -1,8 +1,11 @@
 /**
- * 全局消息管理系统 
+ * 全局消息管理系统
+ * 基于 Notivue 实现，保留向后兼容的 API
  */
 
 import { ref, computed } from "vue";
+import { useTimeoutFn } from "@vueuse/core";
+import { push } from "notivue";
 
 // 全局消息状态 - 使用单例模式
 let globalMessageState = null;
@@ -29,8 +32,14 @@ function createMessageState() {
   const messageContent = computed(() => message.value?.content || null);
 
   // ===== 核心方法 =====
-
-  let currentTimeoutId = null; // 用于管理自动清除的定时器
+  const autoClearDelayMs = ref(0);
+  const { start: startAutoClear, stop: stopAutoClear } = useTimeoutFn(
+    () => {
+      message.value = null;
+    },
+    autoClearDelayMs,
+    { immediate: false }
+  );
 
   /**
    * 根据消息类型和自定义 duration 计算最终展示时长
@@ -65,38 +74,51 @@ function createMessageState() {
     const finalDuration = resolveDurationByType(type, duration);
 
     // 清除之前的定时器，确保新消息优先展示
-    if (currentTimeoutId) {
-      clearTimeout(currentTimeoutId);
-      currentTimeoutId = null;
-    }
+    stopAutoClear();
 
-    // 设置当前要展示的消息
+    // 兼容性：保留旧的“单条消息”状态（有些页面可能还在读 hasMessage/messageContent）
     message.value = {
       type,
       content,
       timestamp: Date.now(),
     };
 
-    // 自动清除消息（duration <= 0 时不自动清除，例如离线场景）
-    if (finalDuration > 0) {
-      currentTimeoutId = setTimeout(() => {
-        clearMessage();
-      }, finalDuration);
+    // Notivue 渲染（全局提示）
+    const notivueOptions = {
+      message: content,
+      duration: finalDuration > 0 ? finalDuration : Infinity,
+    };
+
+    switch (type) {
+      case "success":
+        push.success(notivueOptions);
+        break;
+      case "error":
+        push.error(notivueOptions);
+        break;
+      case "warning":
+        push.warning(notivueOptions);
+        break;
+      case "info":
+      default:
+        push.info(notivueOptions);
+        break;
     }
 
-    console.log(`[GlobalMessage] 显示消息: ${type} - ${content}`);
+    // 自动清除"兼容状态"（Notivue 自己会自动关闭提示，这里只清理 message.value）
+    if (finalDuration > 0) {
+      autoClearDelayMs.value = finalDuration;
+      startAutoClear();
+    }
   };
 
   /**
    * 清除当前消息
    */
   const clearMessage = () => {
-    if (currentTimeoutId) {
-      clearTimeout(currentTimeoutId);
-      currentTimeoutId = null;
-    }
+    stopAutoClear();
     message.value = null;
-    console.log("[GlobalMessage] 清除消息");
+    push.clearAll();
   };
 
   // ===== 便捷方法 =====

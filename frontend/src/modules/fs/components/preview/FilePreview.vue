@@ -1,142 +1,118 @@
 <template>
   <div class="file-preview-container">
     <!-- 文件预览区域 -->
-    <div class="file-preview mb-6 p-4 rounded-lg" :class="darkMode ? 'bg-gray-800/50' : 'bg-white'">
-      <!-- 文件标题和操作按钮 -->
-      <div class="mb-4">
-        <h3 class="text-lg font-medium mb-3" :class="darkMode ? 'text-gray-200' : 'text-gray-700'" :title="file.name">
-          {{ file.name }}
-        </h3>
-        <div class="flex flex-wrap gap-2">
-          <!-- 下载按钮 -->
+    <!-- File Header & Actions Area -->
+    <div class="mb-4 px-1 transition-all duration-300">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <!-- Left: Title & Metadata -->
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 mb-1.5">
+             <h3 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-400 truncate leading-tight" :title="file.name">
+              {{ file.name }}
+            </h3>
+            <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+              {{ file.mimetype || 'FILE' }}
+            </span>
+          </div>
+          
+          <div class="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 font-medium tracking-wide">
+             <span class="flex items-center gap-1.5">
+                <IconDatabase size="sm" class="w-3.5 h-3.5 opacity-70" />
+                <span>{{ formatFileSize(file.size) }}</span>
+             </span>
+             <span class="w-px h-3 bg-gray-300 dark:bg-gray-700"></span>
+             <span class="flex items-center gap-1.5">
+                <IconClock size="sm" class="w-3.5 h-3.5 opacity-70" />
+                <span>{{ formatDate(file.modified) }}</span>
+             </span>
+          </div>
+        </div>
+
+        <!-- Right: Actions Toolbar -->
+        <div class="flex items-center gap-2 self-start sm:self-center">
+          <!-- Download -->
           <button
             @click="handleDownload"
-            class="inline-flex items-center px-3 py-1.5 rounded-md transition-colors text-sm font-medium"
-            :class="darkMode ? 'bg-primary-600 hover:bg-primary-700 text-white' : 'bg-primary-500 hover:bg-primary-600 text-white'"
+            class="group flex items-center justify-center w-8 h-8 rounded-full transition-all bg-transparent text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:text-blue-300 dark:hover:bg-blue-900/20 transform hover:scale-105"
+            :title="t('mount.filePreview.downloadFile')"
           >
-            <svg class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            <span>{{ t("mount.filePreview.downloadFile") }}</span>
+            <IconDownload size="sm" class="w-5 h-5" />
           </button>
 
-          <!-- S3直链预览按钮 -->
+          <!-- Direct Preview -->
           <button
             @click="handleS3DirectPreview"
-            class="inline-flex items-center px-3 py-1.5 rounded-md transition-colors text-sm font-medium"
-            :class="darkMode ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-green-500 hover:bg-green-600 text-white'"
+            class="group flex items-center justify-center w-8 h-8 rounded-full transition-all bg-transparent text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:text-purple-400 dark:hover:text-purple-300 dark:hover:bg-purple-900/20 transform hover:scale-105"
+            :title="t('mount.filePreview.directPreview')"
             :disabled="isGeneratingPreview"
           >
-            <svg v-if="!isGeneratingPreview" class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-              />
-            </svg>
-            <svg v-else class="animate-spin w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            <span>{{ isGeneratingPreview ? t("mount.filePreview.generating") : t("mount.filePreview.directPreview") }}</span>
+            <IconRefresh v-if="isGeneratingPreview" class="w-5 h-5 animate-spin" />
+            <IconEye v-else size="sm" class="w-5 h-5" />
           </button>
 
-          <!-- 生成分享链接按钮 -->
+          <!-- Share -->
           <button
             @click="handleCreateShare"
-            class="inline-flex items-center px-3 py-1.5 rounded-md transition-colors text-sm font-medium"
-            :class="darkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'"
+            class="group flex items-center justify-center w-8 h-8 rounded-full transition-all bg-transparent text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:text-indigo-300 dark:hover:bg-indigo-900/20 transform hover:scale-105"
+            :title="t('mount.filePreview.createShare')"
             :disabled="isCreatingShare"
           >
-            <svg v-if="!isCreatingShare" class="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z"
-              />
-            </svg>
-            <svg v-else class="animate-spin w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            <span>{{ isCreatingShare ? t("mount.filePreview.creatingShare") : t("mount.filePreview.createShare") }}</span>
+            <IconRefresh v-if="isCreatingShare" class="w-5 h-5 animate-spin" />
+            <IconLink v-else size="sm" class="w-5 h-5" />
           </button>
         </div>
       </div>
+    </div>
 
-      <!-- 文件信息 -->
-      <div class="file-info grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 p-3 rounded-lg bg-opacity-50" :class="darkMode ? 'bg-gray-700/50' : 'bg-gray-100'">
-        <div class="file-info-item flex items-center">
-          <span class="font-medium mr-2" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">{{ t("mount.filePreview.fileSize") }}</span>
-          <span :class="darkMode ? 'text-gray-400' : 'text-gray-600'">{{ formatFileSize(file.size) }}</span>
-        </div>
-        <div class="file-info-item flex items-center">
-          <span class="font-medium mr-2" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">{{ t("mount.filePreview.modifiedTime") }}</span>
-          <span :class="darkMode ? 'text-gray-400' : 'text-gray-600'">{{ formatDate(file.modified) }}</span>
-        </div>
-        <div class="file-info-item flex items-center">
-          <span class="font-medium mr-2" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">{{ t("mount.filePreview.fileType") }}</span>
-          <span :class="darkMode ? 'text-gray-400' : 'text-gray-600'">{{ file.mimetype || t("mount.filePreview.unknown") }}</span>
-        </div>
-      </div>
+    <!-- File Content Area (Borderless) -->
+    <div class="file-content overflow-hidden transition-all duration-300">
+      <!-- 非全屏：工具栏和内容分离（保持你原来的布局习惯） -->
+      <PreviewChannelToolbar
+        v-if="!isContentFullscreen"
+        :title="toolbarTitle"
+        :dark-mode="darkMode"
+        :provider-options="toolbarProviderOptions"
+        v-model="toolbarProviderKey"
+        :is-fullscreen="isContentFullscreen"
+        :fullscreen-enter-title="$t('mount.filePreview.fullscreen')"
+        :fullscreen-exit-title="$t('mount.filePreview.exitFullscreen')"
+        @toggle-fullscreen="toggleFullscreen"
+      >
+        <template #left>
+          <template v-if="isText">
+            <select
+              v-model="textPreviewMode"
+              class="mode-select px-3 py-1 text-sm border rounded"
+              :class="darkMode ? 'bg-gray-600 border-gray-500 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
+            >
+              <option v-for="mode in availablePreviewModes" :key="mode.value" :value="mode.value">
+                {{ mode.label }}
+              </option>
+            </select>
 
-      <!-- 文本预览工具栏 -->
-      <div v-if="isText" class="text-preview-toolbar p-3 mb-4 rounded-lg bg-opacity-50" :class="darkMode ? 'bg-gray-700/50' : 'bg-gray-100'">
-        <!-- 响应式布局：桌面端横向，移动端纵向 -->
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <!-- 左侧控制区：模式切换器和编码选择器 -->
-          <div class="toolbar-left flex flex-wrap items-center gap-3">
-            <div class="mode-switcher">
-              <select
-                v-model="textPreviewMode"
-                class="mode-select px-3 py-1 text-sm border rounded"
-                :class="darkMode ? 'bg-gray-600 border-gray-500 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
-              >
-                <option v-for="mode in availablePreviewModes" :key="mode.value" :value="mode.value">
-                  {{ mode.label }}
-                </option>
-              </select>
-            </div>
+            <select
+              v-model="textEncoding"
+              class="encoding-select px-3 py-1 text-sm border rounded"
+              :class="darkMode ? 'bg-gray-600 border-gray-500 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
+            >
+              <option v-for="encoding in availableEncodings" :key="encoding.value" :value="encoding.value" :title="encoding.description">
+                {{ encoding.label }}
+              </option>
+            </select>
+          </template>
+        </template>
 
-            <div class="encoding-selector">
-              <select
-                v-model="textEncoding"
-                class="encoding-select px-3 py-1 text-sm border rounded"
-                :class="darkMode ? 'bg-gray-600 border-gray-500 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
-              >
-                <option v-for="encoding in availableEncodings" :key="encoding.value" :value="encoding.value" :title="encoding.description">
-                  {{ encoding.label }}
-                </option>
-              </select>
-            </div>
-          </div>
-
-          <!-- 右侧按钮区：保存和全屏按钮 -->
-          <div class="toolbar-right flex flex-wrap items-center gap-2">
-            <!-- 右键菜单提示图标 -->
+        <template #right>
+          <template v-if="isText">
             <div
               v-if="textPreviewMode === 'edit'"
               class="context-menu-hint flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 cursor-help hover:scale-110"
               :class="darkMode ? 'hover:bg-gray-700/50' : 'hover:bg-gray-100/50'"
               :title="$t('mount.filePreview.rightClickHint')"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#f59e0b">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
-              </svg>
+              <IconError class="text-yellow-500" aria-hidden="true" />
             </div>
 
-            <!-- 保存按钮 - 仅在编辑模式下显示 -->
             <button
               v-if="textPreviewMode === 'edit'"
               @click="handleSaveFile"
@@ -148,101 +124,74 @@
               ]"
               :title="$t('mount.filePreview.saveFileShortcut')"
             >
-              <!-- Loading图标 -->
-              <svg v-if="isSaving" class="w-4 h-4 mr-1 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
-              </svg>
-              <!-- 保存图标 -->
-              <svg v-else class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
-                />
-              </svg>
+              <IconRefresh v-if="isSaving" class="w-4 h-4 mr-1 animate-spin" aria-hidden="true" />
+              <IconSave v-else size="sm" class="mr-1" aria-hidden="true" />
               {{ isSaving ? $t("mount.filePreview.saving") : $t("mount.filePreview.save") }}
             </button>
-
-            <!-- 全屏按钮 -->
-            <button
-              @click="toggleFullscreen"
-              class="fullscreen-btn flex items-center px-3 py-1 text-sm border rounded transition-colors"
-              :class="darkMode ? 'bg-gray-600 hover:bg-gray-700 border-gray-500 text-gray-200' : 'bg-white hover:bg-gray-50 border-gray-300 text-gray-700'"
-              :title="isContentFullscreen ? '退出全屏' : '全屏显示'"
-            >
-              <svg v-if="!isContentFullscreen" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-                />
-              </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 9V4.5M9 9H4.5M9 9L3.5 3.5M15 9h4.5M15 9V4.5M15 9l5.5-5.5M9 15v4.5M9 15H4.5M9 15l-5.5 5.5M15 15h4.5M15 15v4.5m0 0l5.5 5.5"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
+          </template>
+        </template>
+      </PreviewChannelToolbar>
 
       <!-- 预览内容 -->
       <div
         ref="previewContentRef"
-        class="preview-content border rounded-lg overflow-hidden transition-all duration-300 flex flex-col"
+        class="preview-content border rounded-xl overflow-hidden transition-all duration-300 flex flex-col"
         :class="[darkMode ? 'border-gray-700' : 'border-gray-200']"
-        style="max-height: 600px; min-height: 400px"
+        :style="previewContainerStyle"
       >
-        <!-- 全屏模式下的工具栏 -->
-        <div v-if="isContentFullscreen && isText" class="fullscreen-toolbar p-3 border-b" :class="darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'">
-          <!-- 响应式布局：桌面端横向，移动端纵向 -->
+        <!-- 全屏：在全屏容器里显示一条"内置工具栏" -->
+        <div
+          v-if="isContentFullscreen && !isVideo"
+          class="fullscreen-toolbar sticky top-0 z-20 p-3 border-b"
+          :class="darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'"
+        >
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <!-- 左侧：文件信息 -->
-            <div class="toolbar-left flex flex-wrap items-center gap-3">
-              <h3 class="text-lg font-medium" :class="darkMode ? 'text-gray-200' : 'text-gray-800'">{{ file.name }}</h3>
-              <span class="text-sm" :class="darkMode ? 'text-gray-400' : 'text-gray-600'">{{
-                textPreviewMode === "edit" ? $t("mount.filePreview.editMode") : $t("mount.filePreview.previewMode")
-              }}</span>
+            <div class="toolbar-left flex flex-wrap items-center gap-3 min-w-0">
+              <h3 class="text-lg font-medium truncate" :class="darkMode ? 'text-gray-200' : 'text-gray-800'" :title="file.name">{{ file.name }}</h3>
+              <span class="text-sm" :class="darkMode ? 'text-gray-400' : 'text-gray-600'">{{ toolbarTitle }}</span>
             </div>
 
             <!-- 右侧：控制按钮 -->
             <div class="toolbar-right flex flex-wrap items-center gap-2">
-              <!-- 模式切换 -->
+              <!-- 文本类：模式切换 + 编码 -->
+              <template v-if="isText">
+                <select
+                  v-model="textPreviewMode"
+                  class="mode-select px-2 py-1 text-sm border rounded"
+                  :class="darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
+                >
+                  <option v-for="mode in availablePreviewModes" :key="mode.value" :value="mode.value">
+                    {{ mode.label }}
+                  </option>
+                </select>
+
+                <select
+                  v-model="textEncoding"
+                  class="encoding-select px-2 py-1 text-sm border rounded"
+                  :class="darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
+                >
+                  <option v-for="encoding in availableEncodings" :key="encoding.value" :value="encoding.value" :title="encoding.description">
+                    {{ encoding.label }}
+                  </option>
+                </select>
+              </template>
+
+              <!-- 渠道选择：PDF/Office/EPUB/Iframe（多于 1 个时才显示） -->
               <select
-                v-model="textPreviewMode"
-                class="mode-select px-2 py-1 text-sm border rounded"
+                v-if="toolbarProviderOptions.length > 1"
+                v-model="toolbarProviderKey"
+                class="px-2 py-1 text-sm border rounded"
                 :class="darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
               >
-                <option v-for="mode in availablePreviewModes" :key="mode.value" :value="mode.value">
-                  {{ mode.label }}
+                <option v-for="opt in toolbarProviderOptions" :key="opt.key" :value="opt.key">
+                  {{ opt.label }}
                 </option>
               </select>
 
-              <!-- 编码选择 -->
-              <select
-                v-model="textEncoding"
-                class="encoding-select px-2 py-1 text-sm border rounded"
-                :class="darkMode ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300 text-gray-700'"
-              >
-                <option v-for="encoding in availableEncodings" :key="encoding.value" :value="encoding.value" :title="encoding.description">
-                  {{ encoding.label }}
-                </option>
-              </select>
-
-              <!-- 保存按钮 -->
+              <!-- 文本类：保存按钮（仅编辑模式） -->
               <button
-                v-if="textPreviewMode === 'edit'"
+                v-if="isText && textPreviewMode === 'edit'"
                 @click="handleSaveFile"
                 :disabled="isSaving"
                 class="save-btn flex items-center px-2 py-1 text-sm border rounded transition-colors"
@@ -252,24 +201,8 @@
                 ]"
                 :title="$t('mount.filePreview.saveFileShortcut')"
               >
-                <!-- Loading图标 -->
-                <svg v-if="isSaving" class="w-4 h-4 mr-1 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <!-- 保存图标 -->
-                <svg v-else class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"
-                  />
-                </svg>
+                <IconRefresh v-if="isSaving" class="w-4 h-4 mr-1 animate-spin" aria-hidden="true" />
+                <IconSave v-else size="sm" class="mr-1" aria-hidden="true" />
                 {{ isSaving ? $t("mount.filePreview.saving") : $t("mount.filePreview.save") }}
               </button>
 
@@ -278,31 +211,45 @@
                 @click="toggleFullscreen"
                 class="exit-fullscreen-btn flex items-center px-2 py-1 text-sm border rounded transition-colors"
                 :class="darkMode ? 'bg-gray-600 hover:bg-gray-700 border-gray-500 text-gray-200' : 'bg-white hover:bg-gray-50 border-gray-300 text-gray-700'"
-                title="退出全屏"
+                :title="$t('mount.filePreview.exitFullscreen')"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 9V4.5M9 9H4.5M9 9L3.5 3.5M15 9h4.5M15 9V4.5M15 9l5.5-5.5M9 15v4.5M9 15H4.5M9 15l-5.5 5.5M15 15h4.5M15 15v4.5m0 0l5.5 5.5"
-                  />
-                </svg>
+                <IconCollapse size="sm" aria-hidden="true" />
               </button>
             </div>
           </div>
         </div>
         <!-- 加载指示器 -->
         <div v-if="isLoading" class="flex-1 flex items-center justify-center">
-          <div class="flex flex-col items-center justify-center p-12">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2" :class="darkMode ? 'border-primary-500' : 'border-primary-600'"></div>
+          <div class="p-12">
+            <LoadingIndicator
+              :dark-mode="darkMode"
+              size="3xl"
+              :icon-class="darkMode ? 'text-primary-500' : 'text-primary-600'"
+            />
           </div>
         </div>
 
-        <!-- 图片预览 -->
+        <!-- 图片预览 (含 Live Photo 支持) -->
         <div v-else-if="isImage" class="flex-1 flex justify-center items-center p-4">
+          <!-- Live Photo 预览 -->
+          <LivePhotoViewer
+            v-if="isLivePhoto && authenticatedPreviewUrl && livePhotoVideoUrl"
+            :photo-src="authenticatedPreviewUrl"
+            :video-src="livePhotoVideoUrl"
+            :dark-mode="darkMode"
+            :max-width="'100%'"
+            :show-badge="true"
+            :show-badge-text="true"
+            :show-progress="true"
+            :lazy-load="true"
+            :enable-vibration="true"
+            class="max-w-full max-h-[600px]"
+            @load="handleContentLoaded"
+            @error="handleContentError"
+          />
+          <!-- 普通图片预览 -->
           <img
-            v-if="authenticatedPreviewUrl"
+            v-else-if="authenticatedPreviewUrl"
             :src="authenticatedPreviewUrl"
             :alt="file.name"
             class="max-w-full max-h-[600px] object-contain"
@@ -310,20 +257,26 @@
             @error="handleContentError"
           />
           <div v-else class="loading-indicator text-center py-8">
-            <div class="animate-spin rounded-full h-10 w-10 border-b-2 mx-auto" :class="darkMode ? 'border-primary-500' : 'border-primary-600'"></div>
+            <LoadingIndicator
+              :dark-mode="darkMode"
+              size="2xl"
+              :icon-class="darkMode ? 'text-primary-500' : 'text-primary-600'"
+            />
           </div>
         </div>
 
         <!-- 视频预览 -->
-        <div v-else-if="isVideo">
+        <div v-else-if="isVideo" class="flex-1 min-h-0">
           <VideoPreview
             :file="file"
             :video-url="authenticatedPreviewUrl"
             :dark-mode="darkMode"
             :is-admin="isAdmin"
+            :is-fullscreen="isContentFullscreen"
             :current-path="getCurrentDirectoryPath()"
             :directory-items="directoryItems"
             @loaded="handleContentLoaded"
+            @toggle-fullscreen="toggleFullscreen"
           />
         </div>
 
@@ -345,98 +298,53 @@
 
         <!-- PDF预览 -->
         <div v-else-if="isPdf" class="pdf-preview h-[600px]">
-          <iframe
-            v-if="authenticatedPreviewUrl"
-            :src="authenticatedPreviewUrl"
-            frameborder="0"
-            class="w-full h-full"
+          <PdfFsPreview
+            :preview-url="currentPdfPreviewUrl"
+            :error-message="officePreviewError"
             @load="handleContentLoaded"
             @error="handleContentError"
-          ></iframe>
-          <div v-else class="loading-indicator text-center py-8">
-            <div class="animate-spin rounded-full h-10 w-10 border-b-2 mx-auto" :class="darkMode ? 'border-primary-500' : 'border-primary-600'"></div>
-          </div>
+          />
+        </div>
+
+        <!-- EPUB预览 -->
+        <div v-else-if="isEpub" class="epub-preview h-[600px]">
+          <EpubFsPreview
+            :provider-key="selectedEpubProvider"
+            :providers="resolvedPreview.providers || {}"
+            :native-url="authenticatedPreviewUrl"
+            :dark-mode="darkMode"
+            @load="handleContentLoaded"
+            @error="handleContentError"
+          />
         </div>
 
         <!-- Office文件预览 -->
-        <div v-else-if="isOffice" ref="officePreviewRef" class="office-preview h-[900px] w-full">
-          <!-- Office预览头部控制栏 -->
-          <div class="sticky top-0 z-20 flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ isWordDoc ? t("mount.filePreview.wordPreview") : isExcel ? t("mount.filePreview.excelPreview") : t("mount.filePreview.powerpointPreview") }}
-            </span>
-            <div class="flex items-center space-x-2">
-              <button
-                @click="toggleOfficeFullscreen"
-                class="text-xs px-2 py-1 rounded flex items-center bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
-              >
-                <svg v-if="!isOfficeFullscreen" class="w-3.5 h-3.5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"
-                  />
-                </svg>
-                <svg v-else class="w-3.5 h-3.5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                <span>{{ isOfficeFullscreen ? t("mount.filePreview.exitFullscreen") : t("mount.filePreview.fullscreen") }}</span>
-              </button>
-              <button
-                @click="toggleOfficePreviewService"
-                class="text-xs px-2 py-1 rounded bg-blue-100 dark:bg-blue-700 text-blue-700 dark:text-blue-100 hover:bg-blue-200 dark:hover:bg-blue-600 transition-colors"
-              >
-                {{ useGoogleDocsPreview ? t("mount.filePreview.useMicrosoftPreview") : t("mount.filePreview.useGooglePreview") }}
-              </button>
-            </div>
-          </div>
+        <div v-else-if="isOffice" ref="officePreviewRef" class="office-preview">
+          <OfficeFsPreview
+            :preview-url="currentOfficePreviewUrl"
+            :content-url="officeContentUrl"
+            :filename="file.name"
+            :dark-mode="darkMode"
+            :provider-key="selectedOfficeProvider"
+            :error-message="officePreviewError"
+            :is-fullscreen="isContentFullscreen"
+            @load="handleOfficePreviewLoaded"
+            @error="handleOfficePreviewError"
+          />
+        </div>
 
-          <!-- 加载状态 -->
-          <div v-if="officePreviewLoading" class="flex flex-col items-center justify-center h-full">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 mb-4" :class="darkMode ? 'border-primary-500' : 'border-primary-600'"></div>
-            <p class="text-sm" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">{{ t("mount.filePreview.loadingPreview") }}</p>
-          </div>
-
-          <!-- 错误状态 -->
-          <div v-else-if="officePreviewError" class="flex flex-col items-center justify-center h-full p-4">
-            <svg
-              class="w-16 h-16 mb-4"
-              :class="darkMode ? 'text-red-400' : 'text-red-500'"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            <p class="text-center mb-4" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">{{ officePreviewError }}</p>
-            <button
-              @click="updateOfficePreviewUrls"
-              class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
-              :class="darkMode ? 'bg-primary-600 hover:bg-primary-700 text-white' : 'bg-primary-500 hover:bg-primary-600 text-white'"
-            >
-              {{ t("mount.filePreview.retry") }}
-            </button>
-          </div>
-
-          <!-- 预览内容 -->
-          <div v-else-if="currentOfficePreviewUrl" class="w-full h-full">
-            <iframe
-              :src="currentOfficePreviewUrl"
-              frameborder="0"
-              class="w-full h-full"
-              @load="handleOfficePreviewLoaded"
-              @error="handleOfficePreviewError"
-              sandbox="allow-scripts allow-same-origin allow-forms"
-              referrerpolicy="no-referrer"
-            ></iframe>
-          </div>
+        <!-- iframe 预览 -->
+        <div v-else-if="isIframe" class="iframe-preview h-[600px]">
+          <IframePreview
+            :providers="iframeProviders"
+            :dark-mode="darkMode"
+            :loading-text="t('mount.filePreview.loadingPreview')"
+            :error-text="t('mount.filePreview.previewError')"
+            :selected-provider="selectedIframeProvider"
+            @load="handleContentLoaded"
+            @error="handleContentError"
+            @provider-options="handleIframeProviderOptions"
+          />
         </div>
 
         <!-- Markdown预览 - 使用TextRenderer统一处理 -->
@@ -482,21 +390,7 @@
         <!-- 其他文件类型或错误状态 -->
         <div v-else-if="loadError" class="flex-1 flex items-center justify-center">
           <div class="generic-preview text-center py-12">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-20 w-20 mx-auto mb-4"
-              :class="darkMode ? 'text-red-400' : 'text-red-500'"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
+            <IconExclamationSolid size="5xl" class="mx-auto mb-4" :class="darkMode ? 'text-red-400' : 'text-red-500'" aria-hidden="true" />
             <p class="text-lg font-medium mb-2" :class="darkMode ? 'text-red-300' : 'text-red-700'">{{ t("mount.filePreview.previewError") }}</p>
             <p class="text-sm" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">{{ t("mount.filePreview.retryLoad") }}</p>
           </div>
@@ -517,43 +411,54 @@
         <!-- 不支持预览的文件类型 -->
         <div v-else class="flex-1 flex items-center justify-center">
           <div class="generic-preview text-center py-12">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-20 w-20 mx-auto mb-4"
-              :class="darkMode ? 'text-gray-500' : 'text-gray-400'"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-              />
-            </svg>
+            <IconDocument size="5xl" class="mx-auto mb-4" :class="darkMode ? 'text-gray-500' : 'text-gray-400'" aria-hidden="true" />
             <p class="text-lg font-medium mb-2" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">{{ t("mount.filePreview.cannotPreview") }}</p>
             <p class="text-sm" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">{{ t("mount.filePreview.downloadToView") }}</p>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 外部播放器 Dock (仅视频类型显示，全屏时隐藏) -->
+    <div v-if="isVideo && authenticatedPreviewUrl && !isContentFullscreen" class="external-player-section mt-3 overflow-visible">
+      <ExternalPlayerDock
+        :video-url="authenticatedPreviewUrl"
+        :file-name="file?.name"
+      />
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch, onMounted, onBeforeUnmount } from "vue";
+import { computed, ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { usePreviewRenderers, useFilePreviewExtensions, useFileSave } from "@/composables/index.js";
+import { IconCollapse, IconDocument, IconDownload, IconError, IconExclamationSolid, IconEye, IconLink, IconRefresh, IconSave, IconDatabase, IconClock } from "@/components/icons";
+import LoadingIndicator from "@/components/common/LoadingIndicator.vue";
+import { usePreviewRenderers, useFilePreviewExtensions, useFileSave, resolvePreviewSelection, PREVIEW_KEYS } from "@/composables/index.js";
+import { useProviderSelector } from "@/composables/file-preview/useProviderSelector.js";
+import { useElementFullscreen } from "@/composables/useElementFullscreen.js";
+import { usePathPassword } from "@/composables/usePathPassword.js";
 import { useAuthStore } from "@/stores/authStore.js";
+import { useFsService } from "@/modules/fs/fsService.js";
 import { getPreviewModeFromFilename, PREVIEW_MODES, SUPPORTED_ENCODINGS } from "@/utils/textUtils.js";
-import { isArchiveFile } from "@/utils/fileTypes.js";
 import AudioPreview from "./AudioPreview.vue";
 import VideoPreview from "./VideoPreview.vue";
 import TextPreview from "./TextPreview.vue";
 import ArchivePreview from "./ArchivePreview.vue";
+import PdfFsPreview from "./PdfFsPreview.vue";
+import EpubFsPreview from "./EpubFsPreview.vue";
+import OfficeFsPreview from "./OfficeFsPreview.vue";
+import IframePreview from "@/components/common/IframePreview.vue";
+import PreviewChannelToolbar from "@/components/common/preview/PreviewChannelToolbar.vue";
+import { LivePhotoViewer } from "@/components/common/LivePhoto";
+import { detectLivePhoto, isLivePhotoImage } from "@/utils/livePhotoUtils.js";
+import ExternalPlayerDock from "./ExternalPlayerDock.vue";
+import { createLogger } from "@/utils/logger.js";
 
 const { t } = useI18n();
+const log = createLogger("FilePreview");
+const pathPassword = usePathPassword();
+const fsService = useFsService();
 
 // Props 定义
 const props = defineProps({
@@ -627,9 +532,7 @@ const extensions = useFilePreviewExtensions(
   renderers.handleKeyDown,
   emit,
   renderers.authenticatedPreviewUrl,
-  renderers.previewTimeoutId,
-  renderers.microsoftOfficePreviewUrl,
-  renderers.googleDocsPreviewUrl
+  renderers.previewTimeoutId
 );
 
 // 解构保留的预览功能
@@ -639,19 +542,7 @@ const {
   authenticatedPreviewUrl,
   officePreviewLoading,
   officePreviewError,
-  useGoogleDocsPreview,
   isOfficeFullscreen,
-
-  // 模板中使用的计算属性
-  isImage,
-  isVideo,
-  isAudio,
-  isPdf,
-  isOffice,
-  isText,
-  isWordDoc,
-  isExcel,
-  currentOfficePreviewUrl,
 
   // 模板中使用的DOM引用
   officePreviewRef,
@@ -659,22 +550,44 @@ const {
   // 模板中使用的方法
   formatFileSize,
   formatDate,
-  toggleOfficePreviewService,
   toggleOfficeFullscreen,
   updateOfficePreviewUrls,
   handleContentLoaded,
   handleContentError,
+} = renderers;
 
-  // 渲染器中的方法
+const resolvedPreview = computed(() => resolvePreviewSelection({ file: props.file }));
+
+const previewKey = computed(() => resolvedPreview.value.key);
+const iframeProviders = computed(() => resolvedPreview.value.providers || {});
+
+const isImage = computed(() => previewKey.value === PREVIEW_KEYS.IMAGE);
+const isVideo = computed(() => previewKey.value === PREVIEW_KEYS.VIDEO);
+const isAudio = computed(() => previewKey.value === PREVIEW_KEYS.AUDIO);
+const isPdf = computed(() => previewKey.value === PREVIEW_KEYS.PDF);
+const isEpub = computed(() => previewKey.value === PREVIEW_KEYS.EPUB);
+const isOffice = computed(() => previewKey.value === PREVIEW_KEYS.OFFICE);
+const isIframe = computed(() => previewKey.value === PREVIEW_KEYS.IFRAME);
+const isArchive = computed(() => previewKey.value === PREVIEW_KEYS.ARCHIVE);
+const isMarkdown = computed(() => previewKey.value === PREVIEW_KEYS.MARKDOWN);
+const isText = computed(() =>
+  [PREVIEW_KEYS.TEXT, PREVIEW_KEYS.CODE, PREVIEW_KEYS.MARKDOWN, PREVIEW_KEYS.HTML].includes(previewKey.value)
+);
+
+// 从扩展功能中解构保留的功能
+const {
+  isGeneratingPreview,
+  handleDownload,
+  handleS3DirectPreview,
+  getCurrentDirectoryPath,
+  isCreatingShare,
+  handleCreateShare,
   handleOfficePreviewLoaded,
   handleOfficePreviewError,
   handleAudioPlay,
   handleAudioPause,
   handleAudioError,
-} = renderers;
-
-// 从扩展功能中解构保留的功能
-const { isGeneratingPreview, handleDownload, handleS3DirectPreview, getCurrentDirectoryPath, isCreatingShare, handleCreateShare } = extensions;
+} = extensions;
 
 // 智能初始模式计算属性
 const smartInitialMode = computed(() => {
@@ -687,6 +600,184 @@ const textPreviewMode = ref("text");
 const textEncoding = ref("utf-8");
 const textPreviewRef = ref(null);
 const userHasManuallyChanged = ref(false);
+
+// 文本预览标题（根据当前模式动态显示）
+const textPreviewTitle = computed(() => {
+  const modeLabels = {
+    text: t("mount.filePreview.textPreview"),
+    code: t("mount.filePreview.codePreview"),
+    markdown: "Markdown",
+    html: "HTML",
+    edit: t("mount.filePreview.editMode"),
+  };
+  return modeLabels[textPreviewMode.value] || t("mount.filePreview.textPreview");
+});
+
+// iframe 预览状态管理
+const selectedIframeProvider = ref("");
+const iframeProviderOptionsForToolbar = ref([]);
+
+// 处理 iframe 组件传递的 provider options
+const handleIframeProviderOptions = (options) => {
+  const list = Array.isArray(options) ? options : [];
+  iframeProviderOptionsForToolbar.value = list;
+
+  // 没有可用 provider 时，清空选中值，避免下拉框出现“空值但还显示”的怪状态
+  if (!list.length) {
+    selectedIframeProvider.value = "";
+    return;
+  }
+
+  // 如果当前选中值不存在于新的 options 里，默认选中第一个（比如切换文件/规则后）
+  const exists = list.some((opt) => opt.key === selectedIframeProvider.value);
+  if (!exists) {
+    selectedIframeProvider.value = list[0].key;
+  }
+};
+
+// ===== 统一工具栏（放在 previewContentRef 内，保证全屏时也能显示）=====
+
+const toolbarTitle = computed(() => {
+  if (isText.value) return textPreviewTitle.value;
+  if (isPdf.value) return "PDF";
+  if (isOffice.value) return officeTypeDisplayName.value;
+  if (isEpub.value) return "EPUB";
+  if (isImage.value) return t("mount.filePreview.imagePreview");
+  if (isVideo.value) return t("mount.filePreview.videoPreview");
+  if (isAudio.value) return t("mount.filePreview.audioPreview");
+  if (isIframe.value) return t("mount.filePreview.iframePreview");
+  if (isArchive.value) return t("mount.filePreview.archivePreview");
+  return t("mount.filePreview.previewTypeOther");
+});
+
+const toolbarProviderOptions = computed(() => {
+  if (isPdf.value) return pdfProviderOptions.value;
+  if (isOffice.value) return officeProviderOptions.value;
+  if (isEpub.value) return epubProviderOptions.value;
+  if (isIframe.value) return iframeProviderOptionsForToolbar.value;
+  return [];
+});
+
+const toolbarProviderKey = computed({
+  get() {
+    if (isPdf.value) return selectedPdfProvider.value;
+    if (isOffice.value) return selectedOfficeProvider.value;
+    if (isEpub.value) return selectedEpubProvider.value;
+    if (isIframe.value) return selectedIframeProvider.value;
+    return "";
+  },
+  set(value) {
+    const key = String(value || "");
+    if (isPdf.value) selectedPdfProvider.value = key;
+    if (isOffice.value) selectedOfficeProvider.value = key;
+    if (isEpub.value) selectedEpubProvider.value = key;
+    if (isIframe.value) selectedIframeProvider.value = key;
+  },
+});
+
+// PDF 预览：统一用通用 providers 选择器
+const {
+  providerOptions: pdfProviderOptions,
+  selectedKey: selectedPdfProvider,
+  currentUrl: currentPdfPreviewUrl,
+} = useProviderSelector({
+  providers: computed(() => resolvedPreview.value.providers || {}),
+  nativeUrl: authenticatedPreviewUrl,
+  nativeLabel: computed(() => t("mount.filePreview.browserNative")),
+  labelMap: computed(() => ({
+    pdfjs: t("mount.filePreview.pdfjsLabel"),
+  })),
+});
+
+// Office 预览状态管理
+const selectedOfficeProvider = ref("");
+
+// Office native 渲染内容 URL：强制使用同源 /api/fs/content（避免跨域直链 fetch）
+const officeContentUrl = computed(() => {
+  const fsPath = props.file?.path || "";
+  if (!fsPath) return "";
+  let url = `/api/fs/content?path=${encodeURIComponent(fsPath)}`;
+
+  // 非管理员访问时，附加路径密码 token（如果存在）
+  if (!props.isAdmin) {
+    const token = pathPassword.getPathToken(fsPath);
+    if (token) {
+      url += `&path_token=${encodeURIComponent(token)}`;
+    }
+  }
+
+  return url;
+});
+
+// Office provider 选项
+const officeProviderOptions = computed(() => {
+  const options = [];
+  const providers = resolvedPreview.value.providers || {};
+
+  for (const [key, url] of Object.entries(providers)) {
+    const labelKey = `mount.filePreview.officeProvider.${key}`;
+    const translated = t(labelKey);
+    options.push({
+      key,
+      label: translated === labelKey ? key : translated,
+      url,
+    });
+  }
+
+  return options;
+});
+
+watch(
+  officeProviderOptions,
+  (options) => {
+    if (!options.length) {
+      selectedOfficeProvider.value = "";
+      return;
+    }
+    // 当当前选中值为空或不在 options 中时，默认选中第一个
+    const exists = options.some((opt) => opt.key === selectedOfficeProvider.value);
+    if (!exists) {
+      selectedOfficeProvider.value = options[0].key;
+    }
+  },
+  { immediate: true },
+);
+
+// Office 类型显示名称
+const officeTypeDisplayName = computed(() => {
+  const filename = props.file?.name || "";
+  const ext = filename.split(".").pop()?.toLowerCase();
+
+  // Word 文档
+  if (["doc", "docx", "odt", "rtf"].includes(ext)) {
+    return t("mount.filePreview.wordPreview");
+  }
+  // Excel 表格
+  if (["xls", "xlsx", "ods", "csv"].includes(ext)) {
+    return t("mount.filePreview.excelPreview");
+  }
+  // PowerPoint 演示文稿
+  if (["ppt", "pptx", "odp"].includes(ext)) {
+    return t("mount.filePreview.powerpointPreview");
+  }
+
+  return t("mount.filePreview.officePreview");
+});
+
+// 当前 Office 预览 URL
+const currentOfficePreviewUrl = computed(() => {
+  const options = officeProviderOptions.value;
+  if (!options.length) return "";
+  const current = options.find((opt) => opt.key === selectedOfficeProvider.value) || options[0];
+  return current.url || "";
+});
+
+// EPUB/电子书预览
+const { providerOptions: epubProviderOptions, selectedKey: selectedEpubProvider } = useProviderSelector({
+  providers: computed(() => resolvedPreview.value.providers || {}),
+  nativeUrl: authenticatedPreviewUrl,
+  nativeLabel: computed(() => t("mount.filePreview.browserNative")),
+});
 
 // 使用文件保存composable
 const { isSaving, saveFile } = useFileSave();
@@ -726,10 +817,26 @@ const availableEncodings = computed(() => {
 });
 
 // 内容区域全屏状态管理
-const isContentFullscreen = ref(false);
 const previewContentRef = ref(null);
+const { isFullscreen: isContentFullscreen, toggleFullscreen, exitFullscreen } = useElementFullscreen(previewContentRef, { includeChildren: false });
 
-// 动态计算文本预览的最大高度
+const previewContainerStyle = computed(() => {
+  if (isContentFullscreen.value) {
+    return { height: "100vh" };
+  }
+  // 视频预览：视频自适应
+  if (isVideo.value) {
+    return {
+      maxHeight: "80vh",
+    };
+  }
+  return {
+    minHeight: "400px",
+    maxHeight: "80vh",
+  };
+});
+
+// 动态计算文本预览的最大高度（仅 TextPreview 使用）
 const dynamicMaxHeight = computed(() => {
   if (isContentFullscreen.value) {
     // 全屏模式下：100vh减去工具栏高度(60px)
@@ -740,21 +847,10 @@ const dynamicMaxHeight = computed(() => {
   }
 });
 
-// 简洁的全屏切换实现
-const toggleFullscreen = () => {
-  if (!document.fullscreenElement) {
-    // 进入全屏
-    previewContentRef.value?.requestFullscreen();
-  } else {
-    // 退出全屏
-    document.exitFullscreen();
-  }
-};
-
 // 保存文件功能
 const handleSaveFile = async () => {
   if (!textPreviewRef.value || !textPreviewRef.value.getValue) {
-    console.error("无法获取编辑器内容");
+    log.error("无法获取编辑器内容");
     emit("show-message", {
       type: "error",
       message: t("mount.filePreview.cannotGetEditorContent"),
@@ -790,22 +886,53 @@ const handleSaveFile = async () => {
   }
 };
 
-// 添加缺失的计算属性
-const isMarkdown = computed(() => {
-  // 检查文件扩展名是否为markdown
-  const filename = props.file?.name || "";
-  const ext = filename.split(".").pop()?.toLowerCase();
-  return ["md", "markdown", "mdown", "mkd"].includes(ext);
+// Live Photo 检测
+const livePhotoData = computed(() => {
+  if (!props.file?.name || !isLivePhotoImage(props.file.name)) {
+    return { isLivePhoto: false, videoFile: null };
+  }
+  return detectLivePhoto(props.file, props.directoryItems);
 });
 
-// 压缩文件检测
-const isArchive = computed(() => {
-  return props.file?.name && isArchiveFile(props.file.name);
-});
+const isLivePhoto = computed(() => livePhotoData.value.isLivePhoto);
+
+// Live Photo 视频 URL（注意：<video> 标签无法携带自定义 header；API Key/路径密码场景必须走“预签名直链”）
+const livePhotoVideoUrl = ref("");
+let livePhotoVideoUrlRequestId = 0;
+
+watch(
+  () => livePhotoData.value.videoFile,
+  async (videoFile) => {
+    const currentRequestId = ++livePhotoVideoUrlRequestId;
+
+    if (!videoFile) {
+      livePhotoVideoUrl.value = "";
+      return;
+    }
+
+    // 走 getFileLink 获取预签名 URL（适配 apikey/路径密码）
+    // 说明：当前目录列表的 FsDirectoryItem 类型不包含 previewUrl，因此这里不做 previewUrl 复用分支（避免死代码与误解）。
+    const videoPath = typeof videoFile.path === "string" ? videoFile.path : "";
+    if (!videoPath) {
+      livePhotoVideoUrl.value = "";
+      return;
+    }
+
+    try {
+      const url = await fsService.getFileLink(videoPath, null, false);
+      if (currentRequestId !== livePhotoVideoUrlRequestId) return;
+      livePhotoVideoUrl.value = url || "";
+    } catch (error) {
+      if (currentRequestId !== livePhotoVideoUrlRequestId) return;
+      log.error("[LivePhoto] 获取视频直链失败:", error);
+      livePhotoVideoUrl.value = "";
+    }
+  },
+  { immediate: true }
+);
 
 // 监听模式变化
 watch(textPreviewMode, (newMode) => {
-  console.log("模式切换到:", newMode);
   // 通过ref调用TextPreview组件的方法
   if (textPreviewRef.value) {
     textPreviewRef.value.switchMode(newMode);
@@ -814,7 +941,6 @@ watch(textPreviewMode, (newMode) => {
 
 // 监听编码变化
 watch(textEncoding, (newEncoding) => {
-  console.log("编码切换到:", newEncoding);
   // 通过ref调用TextPreview组件的方法
   if (textPreviewRef.value) {
     textPreviewRef.value.switchEncoding(newEncoding);
@@ -840,28 +966,14 @@ watch(
       if (!oldFile || (oldFile && newFile.name !== oldFile.name)) {
         userHasManuallyChanged.value = false;
         textPreviewMode.value = smartInitialMode.value;
-        console.log(`文件变化，智能设置预览模式: ${newFile.name} → ${smartInitialMode.value}`);
       }
     }
   },
   { immediate: true }
 );
 
-// 组件生命周期
-onMounted(() => {
-  console.log("FilePreview组件已挂载");
-
-  // 监听全屏变化
-  document.addEventListener("fullscreenchange", () => {
-    isContentFullscreen.value = !!document.fullscreenElement;
-  });
-});
-
 onBeforeUnmount(() => {
-  // 退出全屏状态（如果处于全屏中）
-  if (document.fullscreenElement) {
-    document.exitFullscreen().catch(console.error);
-  }
+  void exitFullscreen();
 });
 </script>
 
@@ -899,20 +1011,71 @@ onBeforeUnmount(() => {
   border: none;
 }
 
+/* 全屏模式下 Office 预览填满容器 */
+:deep(:fullscreen .office-preview) {
+  height: 100%;
+}
+
+:deep(:fullscreen .office-fs-preview-wrapper) {
+  height: 100%;
+  max-height: none;
+}
+
+/* 全屏模式下 EPUB 预览填满容器 */
+:deep(:fullscreen .epub-preview) {
+  height: 100% !important;
+  max-height: none !important;
+}
+
+:deep(:fullscreen .epub-fs-preview) {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+:deep(:fullscreen .foliate-epub-view) {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+:deep(:fullscreen foliate-view) {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+/* 全屏模式下 iframe 预览填满容器 */
+:deep(:fullscreen .iframe-preview) {
+  height: 100% !important;
+  max-height: none !important;
+}
+
+:deep(:fullscreen .iframe-container) {
+  height: 100% !important;
+  min-height: unset !important;
+}
+
+:deep(:fullscreen .iframe-preview iframe) {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+/* 全屏模式下 PDF 预览填满容器） */
+:deep(:fullscreen .pdf-preview) {
+  height: 100% !important;
+  max-height: none !important;
+}
+
+/* 全屏模式下视频容器占满 */
+:deep(:fullscreen .video-preview-container) {
+  height: 100% !important;
+  border-radius: 0 !important;
+}
+
 /* 确保全屏模式下的控制栏固定在顶部 */
 :deep(:fullscreen .sticky) {
   position: sticky;
   top: 0;
   z-index: 20;
   width: 100%;
-}
-
-/* 全屏模式下的工具栏样式 */
-:deep(:fullscreen .fullscreen-toolbar) {
-  position: sticky;
-  top: 0;
-  z-index: 21;
-  background-color: inherit;
 }
 
 /* 全屏模式下的文本容器 */
@@ -922,26 +1085,27 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
-/* 全屏模式下工具栏的暗色主题适配 */
-:deep(:fullscreen .fullscreen-toolbar.bg-gray-800) {
-  background-color: #1f2937 !important;
-  border-color: #374151 !important;
-}
-
-:deep(:fullscreen .fullscreen-toolbar.bg-white) {
-  background-color: #ffffff !important;
-  border-color: #e5e7eb !important;
-}
-
 /* 全屏按钮悬停效果增强 */
 button:hover svg {
   transform: scale(1.05);
   transition: transform 0.2s ease;
 }
 
+.fullscreen-toolbar {
+  flex-shrink: 0;
+}
+
 /* Markdown预览样式 */
 .markdown-preview {
   line-height: 1.6;
+}
+
+/* Office预览区样式 - 使用 flex 布局确保子组件正确填充 */
+.office-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Vditor相关样式 */
@@ -1194,16 +1358,7 @@ button:hover svg {
   color: #db8942 !important;
 }
 
-/* 上面是旧的 */
-
-/* 全屏模式样式 */
-.preview-content-fullscreen {
-  background-color: var(--bg-color);
-}
-
-.fullscreen-toolbar {
-  flex-shrink: 0;
-}
+/* 上面是旧的：历史遗留样式（已不再使用） */
 
 .fullscreen-text-container {
   height: calc(100vh - 60px); /* 减去工具栏高度 */
@@ -1222,16 +1377,7 @@ button:hover svg {
 }
 
 /* 确保Monaco编辑器在全屏模式下正确显示 */
-.preview-content-fullscreen :deep(.monaco-editor) {
+.fullscreen-text-container :deep(.monaco-editor) {
   height: 100% !important;
-}
-
-/* 暗色主题变量 */
-:root {
-  --bg-color: #ffffff;
-}
-
-.dark {
-  --bg-color: #1f2937;
 }
 </style>

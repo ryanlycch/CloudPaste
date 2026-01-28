@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
+import { onClickOutside } from "@vueuse/core";
 import MasonryWall from "@yeger/vue-masonry-wall";
 import PasteMasonryCard from "./PasteMasonryCard.vue";
 import { usePasteMasonryView } from "../usePasteMasonryView";
+import { IconAdjustments, IconArchive, IconGrid, IconRefresh } from "@/components/icons";
 
 /**
  * Paste 瀑布流视图组件
@@ -36,6 +38,8 @@ const props = defineProps({
 
 const emit = defineEmits(["toggle-select-all", "toggle-select-item", "view", "copy-link", "copy-raw-link", "preview", "edit", "delete", "show-qrcode", "quick-edit-content"]);
 
+const toolbarRef = ref(null);
+
 // 使用瀑布流视图配置
 const {
   // 设置状态
@@ -62,18 +66,11 @@ const {
   cleanupWatchers,
 } = usePasteMasonryView();
 
-// 处理窗口大小变化
-const handleResize = () => {
-  // MasonryWall会自动响应宽度变化，这里保留以防未来需要
-};
-
-// 点击外部关闭菜单
-const handleClickOutside = (event) => {
-  // 关闭工具栏菜单
-  if (!event.target.closest(".paste-masonry-toolbar")) {
-    showViewSettings.value = false;
-  }
-};
+// 点击外部关闭菜单（VueUse 自动管理监听器与清理）
+onClickOutside(toolbarRef, () => {
+  if (!showViewSettings.value) return;
+  showViewSettings.value = false;
+});
 
 // 更新CSS变量以控制垂直间距（水平间距由MasonryWall的gap属性控制）
 const updateSpacingCSSVariables = () => {
@@ -93,9 +90,6 @@ watch(
 );
 
 onMounted(() => {
-  window.addEventListener("resize", handleResize);
-  document.addEventListener("click", handleClickOutside);
-
   // 设置监听器
   setupWatchers();
 
@@ -106,8 +100,6 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener("resize", handleResize);
-  document.removeEventListener("click", handleClickOutside);
   // 清理瀑布流视图的监听器
   cleanupWatchers();
 });
@@ -124,7 +116,7 @@ const handleCardClick = (paste) => {
 <template>
   <div class="paste-masonry-view">
     <!-- 瀑布流工具栏 -->
-    <div class="paste-masonry-toolbar mb-4" :class="darkMode ? 'bg-gray-800/80' : 'bg-white/90'">
+    <div ref="toolbarRef" class="paste-masonry-toolbar mb-4" :class="darkMode ? 'bg-gray-800/80' : 'bg-white/90'">
       <!-- 主工具栏 -->
       <div class="px-3 py-2 border-b" :class="darkMode ? 'border-gray-700' : 'border-gray-200'">
         <div class="flex items-center justify-between">
@@ -132,9 +124,7 @@ const handleCardClick = (paste) => {
           <div class="flex items-center gap-3">
             <div class="flex items-center gap-2">
               <!-- 瀑布流图标 -->
-              <svg class="w-5 h-5" :class="darkMode ? 'text-primary-400' : 'text-primary-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zM14 13a1 1 0 011-1h4a1 1 0 011 1v6a1 1 0 01-1 1h-4a1 1 0 01-1-1v-6z" />
-              </svg>
+              <IconGrid class="w-5 h-5" :class="darkMode ? 'text-primary-400' : 'text-primary-600'" />
               <span class="font-medium text-sm" :class="darkMode ? 'text-gray-200' : 'text-gray-900'">瀑布流视图</span>
             </div>
 
@@ -155,9 +145,7 @@ const handleCardClick = (paste) => {
               class="flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors"
               :class="darkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-700'"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
-              </svg>
+              <IconAdjustments class="w-4 h-4" />
               <span class="hidden sm:inline">视图设置</span>
             </button>
           </div>
@@ -289,23 +277,13 @@ const handleCardClick = (paste) => {
 
     <!-- 加载状态 -->
     <div v-if="loading" class="flex justify-center items-center py-12" :class="darkMode ? 'text-gray-300' : 'text-gray-500'">
-      <svg class="animate-spin h-8 w-8 text-primary-500 mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-      </svg>
+      <IconRefresh class="animate-spin h-8 w-8 text-primary-500 mr-3" />
       <span class="text-lg">加载中...</span>
     </div>
 
     <!-- 空数据状态 -->
     <div v-else-if="pastes.length === 0" class="flex flex-col items-center justify-center py-16" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-        />
-      </svg>
+      <IconArchive class="h-16 w-16 mb-4 opacity-50" />
       <p class="text-lg font-medium">暂无文本分享数据</p>
       <p class="text-sm mt-2">创建第一个文本分享来开始使用瀑布流视图</p>
     </div>

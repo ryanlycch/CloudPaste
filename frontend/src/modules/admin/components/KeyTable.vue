@@ -4,12 +4,21 @@ import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import { Permission, PermissionChecker } from "@/constants/permissions.js";
 import { useAdminApiKeyService } from "@/modules/admin/services/apiKeyService.js";
+import { useConfirmDialog } from "@/composables/core/useConfirmDialog.js";
 import AdminTable from "@/components/common/AdminTable.vue";
+import ConfirmDialog from "@/components/common/dialogs/ConfirmDialog.vue";
 import { formatDateTime } from "@/utils/timeUtils.js";
+import { IconKey } from "@/components/icons";
+import LoadingIndicator from "@/components/common/LoadingIndicator.vue";
+import { createLogger } from "@/utils/logger.js";
 
 // i18n
 const { t } = useI18n();
+const log = createLogger("KeyTable");
 const { deleteApiKey } = useAdminApiKeyService();
+
+// 确认对话框
+const { dialogState, confirm, handleConfirm, handleCancel } = useConfirmDialog();
 
 // Props
 const props = defineProps({
@@ -464,12 +473,12 @@ const keyColumns = computed(() => [
 const keyColumnClasses = computed(() => ({
   name: "",
   key: "",
-  permissions: "hidden lg:table-cell",
-  basic_path: "hidden xl:table-cell",
-  expires_at: "hidden 2xl:table-cell",
-  last_used: "hidden 2xl:table-cell",
-  status: "",
-  actions: ""
+  permissions: "hidden lg:table-cell text-center",
+  basic_path: "hidden xl:table-cell text-center",
+  expires_at: "hidden 2xl:table-cell text-center",
+  last_used: "hidden 2xl:table-cell text-center",
+  status: "text-center",
+  actions: "text-center"
 }));
 
 // ========== 选择管理 ==========
@@ -517,7 +526,7 @@ const toggleKeyStatus = async (key) => {
     emit("success", t(newStatus ? "admin.keyManagement.success.enabled" : "admin.keyManagement.success.disabled"));
     emit("refresh");
   } catch (e) {
-    console.error("切换API密钥状态失败:", e);
+    log.error("切换API密钥状态失败:", e);
     error.value = e.message || t("admin.keyManagement.error.updateFailed");
     emit("error", error.value);
   }
@@ -530,7 +539,16 @@ const handleDeleteKey = async (key) => {
     return;
   }
 
-  if (!confirm(t("admin.keyManagement.deleteConfirm"))) {
+  // 使用统一确认对话框
+  const confirmed = await confirm({
+    title: t("common.dialogs.deleteTitle"),
+    message: t("common.dialogs.deleteItem", { name: t("admin.keyManagement.item", "此 API 密钥") }),
+    confirmType: "danger",
+    confirmText: t("common.dialogs.deleteButton"),
+    darkMode: props.darkMode,
+  });
+
+  if (!confirmed) {
     return;
   }
 
@@ -546,7 +564,7 @@ const handleDeleteKey = async (key) => {
     emit("success", t("admin.keyManagement.success.deleted"));
     emit("refresh");
   } catch (e) {
-    console.error("删除API密钥失败:", e);
+    log.error("删除API密钥失败:", e);
     error.value = e.message || t("admin.keyManagement.error.deleteFailed");
     emit("error", error.value);
   }
@@ -565,7 +583,7 @@ const copyKeyToClipboard = async (keyValue) => {
       throw new Error(t("admin.keyManagement.error.copyFailed"));
     }
   } catch (e) {
-    console.error("复制到剪贴板失败:", e);
+    log.error("复制到剪贴板失败:", e);
     error.value = t("admin.keyManagement.error.copyFailed");
     emit("error", error.value);
   }
@@ -588,20 +606,18 @@ defineExpose({
   <div class="flex flex-col">
     <!-- 加载状态 -->
     <div v-if="isLoading && apiKeys.length === 0" class="flex flex-col items-center justify-center h-40">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2" :class="darkMode ? 'border-white' : 'border-primary-500'"></div>
-      <p class="mt-3 text-sm" :class="darkMode ? 'text-gray-300' : 'text-gray-600'">{{ $t("admin.keyManagement.loadingKeys") }}</p>
+      <LoadingIndicator
+        :text="$t('admin.keyManagement.loadingKeys')"
+        :dark-mode="darkMode"
+        size="xl"
+        :icon-class="darkMode ? 'text-white' : 'text-primary-500'"
+        :text-class="darkMode ? 'text-gray-300' : 'text-gray-600'"
+      />
     </div>
 
     <!-- 空状态 -->
     <div v-else-if="apiKeys.length === 0" class="text-center p-12 rounded-lg border-2 border-dashed" :class="darkMode ? 'border-gray-700 text-gray-400 bg-gray-800/30' : 'border-gray-200 text-gray-500 bg-gray-50'">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="1.5"
-          d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-        />
-      </svg>
+      <IconKey size="4xl" class="mx-auto mb-4 opacity-40" aria-hidden="true" />
       <p class="text-lg font-semibold mb-2">{{ $t("admin.keyManagement.noKeysTitle") }}</p>
       <p>{{ $t("admin.keyManagement.noKeysDescription") }}</p>
     </div>
@@ -767,5 +783,12 @@ defineExpose({
         </template>
       </AdminTable>
     </div>
+
+    <!-- 确认对话框 -->
+    <ConfirmDialog
+      v-bind="dialogState"
+      @confirm="handleConfirm"
+      @cancel="handleCancel"
+    />
   </div>
 </template>

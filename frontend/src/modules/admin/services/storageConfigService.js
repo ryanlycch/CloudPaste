@@ -180,10 +180,9 @@ export function useAdminStorageConfigService() {
       if (!resp.success) {
         throw new Error(resp.message || "测试存储配置失败");
       }
-      // 通常 data.result 才是真正的测试结果
-      return resp.data?.result ?? resp.data ?? {};
+      return resp.data;
     }
-    return resp.result ?? resp.data?.result ?? resp;
+    throw new Error("测试存储配置失败：响应结构无效");
   };
 
   return {
@@ -196,4 +195,3 @@ export function useAdminStorageConfigService() {
     testStorageConfig,
   };
 }
-

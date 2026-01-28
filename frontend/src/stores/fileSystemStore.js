@@ -1,12 +1,14 @@
 /**
  * 文件系统 Pinia Store
  * 负责挂载浏览器中 FS 目录浏览的核心状态
+ * 支持请求取消机制，优化导航体验
  */
 
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { useAuthStore } from "./authStore.js";
 import { useFsService } from "@/modules/fs";
+import { createLogger } from "@/utils/logger.js";
 
 /** @typedef {import("@/types/fs").FsDirectoryResponse} FsDirectoryResponse */
 /** @typedef {import("@/types/fs").FsDirectoryItem} FsDirectoryItem */
@@ -15,6 +17,7 @@ import { useFsService } from "@/modules/fs";
 export const useFileSystemStore = defineStore("fileSystem", () => {
   const fsService = useFsService();
   const authStore = useAuthStore();
+  const log = createLogger("FileSystemStore");
 
   // ===== 状态 =====
   const currentPath = ref("/");
@@ -54,15 +57,16 @@ export const useFileSystemStore = defineStore("fileSystem", () => {
 
   /**
    * 加载目录内容
+   * 支持请求取消：当用户快速导航时，旧请求会被自动取消
    * @param {string} path - 目录路径
    * @param {boolean} [force=false] - 是否强制刷新
    */
   const loadDirectory = async (path, force = false) => {
     const normalizedPath = path || "/";
 
-    // 避免重复请求
+    // 避免重复请求（同一路径且非强制刷新）
     if (!force && currentLoadingPath.value === normalizedPath) {
-      console.log(`目录 ${normalizedPath} 正在加载中，跳过重复请求`);
+      log.debug(`目录 ${normalizedPath} 正在加载中，跳过重复请求`);
       return;
     }
 
@@ -72,17 +76,36 @@ export const useFileSystemStore = defineStore("fileSystem", () => {
       return;
     }
 
+    // 立即更新当前路径，让 UI 先响应（面包屑等）
+    currentPath.value = normalizedPath;
+
     try {
       loading.value = true;
       currentLoadingPath.value = normalizedPath;
       error.value = null;
 
+      // fsService.getDirectoryList 内部会自动取消之前的请求
       const data = await fsService.getDirectoryList(normalizedPath, { refresh: force });
-      directoryData.value = data;
-      currentPath.value = normalizedPath;
+      
+      // 如果请求被取消，data 为 null，不更新状态
+      if (data === null) {
+        log.debug("目录请求被取消，跳过状态更新:", normalizedPath);
+        return;
+      }
+
+      // 确保响应对应当前请求的路径（防止竞态）
+      if (currentPath.value === normalizedPath) {
+        directoryData.value = data;
+      }
     } catch (err) {
-      console.error("加载目录失败:", err);
-      // 针对路径密码校验失败的场景，不将其视为“普通错误”，交给路径密码弹窗处理
+      // 请求被取消时，静默处理，不显示错误
+      if (/** @type {any} */ (err)?.name === "AbortError" || /** @type {any} */ (err)?.__aborted) {
+        log.debug("目录请求被取消，静默处理:", normalizedPath);
+        return;
+      }
+
+      log.error("加载目录失败:", err);
+      // 针对路径密码校验失败的场景，不将其视为"普通错误"，交给路径密码弹窗处理
       if (/** @type {any} */ (err)?.code === "FS_PATH_PASSWORD_REQUIRED") {
         directoryData.value = null;
         error.value = null;
@@ -91,8 +114,11 @@ export const useFileSystemStore = defineStore("fileSystem", () => {
         directoryData.value = null;
       }
     } finally {
-      loading.value = false;
-      currentLoadingPath.value = null;
+      // 只有当前加载路径匹配时才清除 loading 状态
+      if (currentLoadingPath.value === normalizedPath) {
+        loading.value = false;
+        currentLoadingPath.value = null;
+      }
     }
   };
 
@@ -114,6 +140,7 @@ export const useFileSystemStore = defineStore("fileSystem", () => {
     loading.value = false;
     error.value = null;
     currentLoadingPath.value = null;
+    fsService.cancelAllRequests();
   };
 
   return {

@@ -6,6 +6,8 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { api } from "@/api";
+import { copyToClipboard } from "@/utils/clipboard";
+import { createLogger } from "@/utils/logger.js";
 
 export function useFilePreviewExtensions(
   file,
@@ -18,11 +20,10 @@ export function useFilePreviewExtensions(
   handleKeyDown,
   emit,
   authenticatedPreviewUrl,
-  previewTimeoutId,
-  microsoftOfficePreviewUrl,
-  googleDocsPreviewUrl
+  previewTimeoutId
 ) {
   const { t } = useI18n();
+  const log = createLogger("PreviewExtensions");
 
   // ===== Office预览处理 =====
 
@@ -33,14 +34,14 @@ export function useFilePreviewExtensions(
     officePreviewLoading.value = false;
     officePreviewError.value = "";
     officePreviewTimedOut.value = false;
-    console.log("Office预览加载完成");
+    log.debug("Office预览加载完成");
   };
 
   /**
    * Office预览加载错误处理
    */
   const handleOfficePreviewError = (error) => {
-    console.error("Office预览加载错误:", error);
+    log.error("Office预览加载错误:", error);
 
     // 清除加载状态
     officePreviewLoading.value = false;
@@ -53,7 +54,7 @@ export function useFilePreviewExtensions(
       officePreviewError.value = t("mount.filePreview.previewError");
     }
 
-    console.log("Office预览错误处理完成");
+    log.debug("Office预览错误处理完成");
   };
 
   // ===== 编辑模式处理已移除 =====
@@ -64,7 +65,7 @@ export function useFilePreviewExtensions(
    * 音频播放事件处理
    */
   const handleAudioPlay = (data) => {
-    console.log("音频开始播放:", data);
+    log.debug("音频开始播放:", data);
     // 可以在这里添加播放统计或其他逻辑
   };
 
@@ -72,7 +73,7 @@ export function useFilePreviewExtensions(
    * 音频暂停事件处理
    */
   const handleAudioPause = (data) => {
-    console.log("音频暂停播放:", data);
+    log.debug("音频暂停播放:", data);
     // 可以在这里添加暂停统计或其他逻辑
   };
 
@@ -80,13 +81,13 @@ export function useFilePreviewExtensions(
    * 音频错误事件处理
    */
   const handleAudioError = (error) => {
-    // 忽略Service Worker相关的误报错误
+    // 忽略Service Worker相关的误报错误（基于当前预览URL）
     if (error?.target?.src?.includes(window.location.origin) && previewUrl.value?.startsWith("https://")) {
-      console.log("🎵 忽略Service Worker相关的误报错误，音频实际可以正常播放");
+      log.debug("忽略Service Worker相关的误报错误，音频实际可以正常播放");
       return;
     }
 
-    console.error("音频播放错误:", error);
+    log.error("音频播放错误:", error);
   };
 
   // ===== 其他功能 =====
@@ -109,21 +110,19 @@ export function useFilePreviewExtensions(
 
     try {
       isGeneratingPreview.value = true;
-      console.log("开始生成S3直链预览...");
+      log.debug("开始生成直链/代理预览...");
 
-      // 直接使用文件信息中的preview_url字段（S3直链）
-      if (file.value.preview_url) {
-        console.log("S3直链预览使用文件信息中的preview_url:", file.value.preview_url);
-        window.open(file.value.preview_url, "_blank");
-        console.log("S3直链预览成功");
-        return;
+      const baseUrl = previewUrl.value;
+      if (!baseUrl) {
+        throw new Error("当前文件缺少可用的预览URL");
       }
 
-      // 如果没有preview_url，说明后端有问题
-      console.error("S3直链预览：文件信息中没有preview_url字段，请检查后端getFileInfo实现");
-      throw new Error("文件信息中缺少preview_url字段");
+      log.debug("直链/代理预览使用原始URL:", baseUrl);
+      window.open(baseUrl, "_blank");
+      log.debug("预览成功");
+      return;
     } catch (error) {
-      console.error("S3直链预览失败:", error);
+      log.error("S3直链预览失败:", error);
       emit("show-message", {
         type: "error",
         message: t("mount.filePreview.s3PreviewError", { message: error.message }),
@@ -170,7 +169,10 @@ export function useFilePreviewExtensions(
       if (result.success) {
         // 复制分享链接到剪贴板
         const shareUrl = `${window.location.origin}${result.data.url}`;
-        await navigator.clipboard.writeText(shareUrl);
+        const success = await copyToClipboard(shareUrl);
+        if (!success) {
+          throw new Error("复制分享链接失败");
+        }
 
         // 显示成功消息
         emit("show-message", {
@@ -181,7 +183,7 @@ export function useFilePreviewExtensions(
         throw new Error(result.message || "创建分享失败");
       }
     } catch (error) {
-      console.error("创建分享失败:", error);
+      log.error("创建分享失败:", error);
       emit("show-message", {
         type: "error",
         message: t("mount.messages.shareCreateFailed", { message: error.message }),
@@ -197,11 +199,7 @@ export function useFilePreviewExtensions(
    * 组件挂载时的初始化
    */
   const initializeExtensions = () => {
-    // 添加全屏变化监听
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("keydown", handleKeyDown);
-
-    console.log("文件预览扩展功能初始化完成");
+    log.debug("文件预览扩展功能初始化完成");
   };
 
   /**
@@ -214,23 +212,13 @@ export function useFilePreviewExtensions(
       authenticatedPreviewUrl.value = null;
     }
 
-    // 移除事件监听器
-    document.removeEventListener("keydown", handleKeyDown);
-    document.removeEventListener("fullscreenchange", handleFullscreenChange);
-
     // 清除计时器
     if (previewTimeoutId && previewTimeoutId.value) {
       clearTimeout(previewTimeoutId.value);
       previewTimeoutId.value = null;
     }
-    if (microsoftOfficePreviewUrl) {
-      microsoftOfficePreviewUrl.value = "";
-    }
-    if (googleDocsPreviewUrl) {
-      googleDocsPreviewUrl.value = "";
-    }
 
-    console.log("文件预览扩展功能清理完成");
+    log.debug("文件预览扩展功能清理完成");
   };
 
   // 生命周期钩子

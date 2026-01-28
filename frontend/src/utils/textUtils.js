@@ -4,6 +4,10 @@
  */
 
 import { SUPPORTED_ENCODINGS, normalizeEncoding } from "./encodingDetector.js";
+import { fetchFileBinaryWithAuth } from "@/api/services/fileDownloadService.js";
+import { createLogger } from "@/utils/logger.js";
+
+const log = createLogger("TextUtils");
 
 /**
  * 使用指定编码解码二进制数据为文本
@@ -33,7 +37,7 @@ export async function decodeText(buffer, encoding = "utf-8") {
 
     // 如果替换字符比例过高，可能编码不正确
     if (replacementRatio > 0.1) {
-      console.warn(`编码 ${encoding} 解码质量较差，替换字符比例: ${(replacementRatio * 100).toFixed(2)}%`);
+      log.warn(`编码 ${encoding} 解码质量较差，替换字符比例: ${(replacementRatio * 100).toFixed(2)}%`);
     }
 
     return {
@@ -45,11 +49,11 @@ export async function decodeText(buffer, encoding = "utf-8") {
       error: null,
     };
   } catch (error) {
-    console.error(`使用编码 ${encoding} 解码失败:`, error);
+    log.error(`使用编码 ${encoding} 解码失败:`, error);
 
     // 尝试使用UTF-8作为后备
     if (encoding !== "utf-8") {
-      console.log("尝试使用UTF-8后备编码...");
+      log.debug("尝试使用UTF-8后备编码...");
       return await decodeText(buffer, "utf-8");
     }
 
@@ -72,50 +76,27 @@ export async function decodeText(buffer, encoding = "utf-8") {
  * @returns {Promise<Object>} 解码结果
  */
 export async function fetchAndDecodeText(url, encoding = "utf-8", options = {}) {
-  const { timeout = 30000, maxSize = 10 * 1024 * 1024 } = options; // 默认最大10MB
+  const { timeout = 30000, maxSize = 10 * 1024 * 1024, signal } = options; // 默认最大10MB
 
   try {
-    // 创建超时控制器
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    // 获取文件
-    const response = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
+    // 通过统一的带鉴权工具获取二进制数据
+    const { buffer, size } = await fetchFileBinaryWithAuth(url, {
+      signal,
+      timeout,
+      maxSize,
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    // 检查文件大小
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && parseInt(contentLength) > maxSize) {
-      throw new Error(`文件过大: ${Math.round(parseInt(contentLength) / 1024 / 1024)}MB，超过限制 ${Math.round(maxSize / 1024 / 1024)}MB`);
-    }
-
-    // 获取二进制数据
-    const arrayBuffer = await response.arrayBuffer();
-
-    // 检查实际大小
-    if (arrayBuffer.byteLength > maxSize) {
-      throw new Error(`文件过大: ${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB，超过限制 ${Math.round(maxSize / 1024 / 1024)}MB`);
-    }
-
     // 解码文本
-    const decodeResult = await decodeText(arrayBuffer, encoding);
+    const decodeResult = await decodeText(buffer, encoding);
 
     return {
       ...decodeResult,
-      fileSize: arrayBuffer.byteLength,
-      rawBuffer: arrayBuffer,
+      fileSize: size,
+      rawBuffer: buffer,
       url,
     };
   } catch (error) {
-    console.error("获取和解码文件失败:", error);
+    log.error("获取和解码文件失败:", error);
 
     return {
       success: false,

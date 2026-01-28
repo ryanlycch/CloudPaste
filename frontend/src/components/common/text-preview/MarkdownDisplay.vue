@@ -5,21 +5,12 @@
 
     <!-- 加载状态覆盖层 -->
     <div v-if="loading" class="loading-overlay">
-      <svg
-        class="animate-spin h-8 w-8 mb-4"
-        :class="darkMode ? 'text-primary-500' : 'text-primary-600'"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-      >
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path
-          class="opacity-75"
-          fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-        ></path>
-      </svg>
-      <p class="loading-text">{{ $t("textPreview.loadingMarkdown") }}</p>
+      <LoadingIndicator
+        :text="$t('textPreview.loadingMarkdown')"
+        :dark-mode="darkMode"
+        size="xl"
+        :icon-class="darkMode ? 'text-primary-500' : 'text-primary-600'"
+      />
     </div>
 
     <!-- 错误状态覆盖层 -->
@@ -31,11 +22,14 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
-import { loadVditor, VDITOR_ASSETS_BASE } from "@/utils/vditorLoader.js";
+import LoadingIndicator from "@/components/common/LoadingIndicator.vue";
+import { ensureMermaidPatchedForVditor, loadVditor, mightContainMermaid, VDITOR_ASSETS_BASE } from "@/utils/vditorLoader.js";
+import { createLogger } from "@/utils/logger.js";
 
 const { t } = useI18n();
+const log = createLogger("MarkdownDisplay");
 
 // Props
 const props = defineProps({
@@ -58,12 +52,27 @@ const error = ref(null);
 const rendered = ref(false);
 const markdownContainer = ref(null);
 const isDestroyed = ref(false);
+const isActive = ref(true);
+let renderVersion = 0;
+let renderTimer = null;
+
+/**
+ * 检查组件是否应该继续执行异步操作
+ * @param {number} version - 发起操作时的版本号
+ * @returns {boolean} - 是否应该继续
+ */
+const shouldContinue = (version) => {
+  return !isDestroyed.value && isActive.value && version === renderVersion;
+};
 
 /**
  * 渲染Markdown内容
  */
 const renderMarkdown = async () => {
-  if (!props.content || isDestroyed.value) return;
+  // 递增版本号，使之前的异步操作失效
+  const currentVersion = ++renderVersion;
+
+  if (!props.content || !shouldContinue(currentVersion)) return;
 
   try {
     loading.value = true;
@@ -73,9 +82,9 @@ const renderMarkdown = async () => {
     // 确保DOM更新后再初始化Vditor
     await nextTick();
 
-    // 更严格的组件状态检查
-    if (isDestroyed.value || !markdownContainer.value) {
-      console.warn("MarkdownDisplay组件已销毁或DOM不存在，跳过渲染");
+    // 更严格的组件状态检查（包含版本检查）
+    if (!shouldContinue(currentVersion) || !markdownContainer.value) {
+      log.warn("MarkdownDisplay组件已销毁/隐藏或DOM不存在，跳过渲染");
       return;
     }
 
@@ -88,14 +97,34 @@ const renderMarkdown = async () => {
     try {
       VditorConstructor = await loadVditor();
     } catch (loadError) {
-      console.error("Vditor 加载失败:", loadError);
+      log.error("Vditor 加载失败:", loadError);
       throw new Error(`Vditor 加载失败: ${loadError.message}`);
     }
 
-    // 再次检查组件状态
-    if (isDestroyed.value || !markdownContainer.value) {
-      console.warn("MarkdownDisplay组件已销毁，取消Vditor渲染");
+    // 再次检查组件状态（包含版本检查）
+    if (!shouldContinue(currentVersion) || !markdownContainer.value) {
+      log.warn("MarkdownDisplay组件已销毁/隐藏，取消Vditor渲染");
       return;
+    }
+
+    // 检查 Vditor 是否有效
+    if (!VditorConstructor || typeof VditorConstructor.preview !== "function") {
+      throw new Error("Vditor.preview 方法不可用");
+    }
+
+    // 避免 foreignObject 的 width 出现极小负数，导致控制台报错。
+    if (mightContainMermaid(props.content)) {
+      try {
+        await ensureMermaidPatchedForVditor();
+      } catch (patchError) {
+        log.warn("Mermaid 补丁加载失败（将继续正常渲染）:", patchError);
+      }
+
+      // 异步等待后再做一次状态检查，避免组件已切走但仍继续渲染
+      if (!shouldContinue(currentVersion) || !markdownContainer.value) {
+        log.warn("MarkdownDisplay组件已销毁/隐藏，跳过 Mermaid 补丁后的渲染");
+        return;
+      }
     }
 
     try {
@@ -132,14 +161,14 @@ const renderMarkdown = async () => {
           inlineDigit: true,
         },
         after: () => {
-          // 检查组件是否已被销毁
-          if (isDestroyed.value || !markdownContainer.value) {
-            console.warn("MarkdownDisplay组件已销毁，跳过after回调");
+          // 检查组件是否已被销毁/隐藏，或者是否是过期的渲染操作
+          if (!shouldContinue(currentVersion) || !markdownContainer.value) {
+            log.warn("MarkdownDisplay组件已销毁/隐藏或渲染已过期，跳过after回调");
             return;
           }
 
           // 渲染完成后的回调
-          console.log("Markdown 内容渲染完成");
+          log.debug("Markdown 内容渲染完成");
 
           // 强制添加对应主题的类
           if (props.darkMode) {
@@ -157,13 +186,13 @@ const renderMarkdown = async () => {
         },
       });
     } catch (previewError) {
-      console.error("Vditor.preview 调用失败:", previewError);
+      log.error("Vditor.preview 调用失败:", previewError);
       throw new Error(`Markdown 渲染失败: ${previewError.message}`);
     }
 
-    console.log("Markdown 预览渲染成功");
+    log.debug("Markdown 预览渲染成功");
   } catch (err) {
-    console.error("Markdown 预览渲染失败:", err);
+    log.error("Markdown 预览渲染失败:", err);
     error.value = err.message || t("textPreview.markdownRenderFailed");
     loading.value = false;
     rendered.value = false;
@@ -171,28 +200,75 @@ const renderMarkdown = async () => {
   }
 };
 
+/**
+ * 延迟渲染（防抖）
+ */
+const scheduleRenderMarkdown = () => {
+  // 递增版本号，让已经排队/执行中的任务失效
+  renderVersion++;
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => {
+    renderTimer = null;
+    renderMarkdown();
+  }, 80);
+};
+
 // 监听内容变化
-watch(() => props.content, renderMarkdown);
+watch(() => props.content, scheduleRenderMarkdown);
 
 // 监听暗色模式变化，重新渲染
-watch(() => props.darkMode, renderMarkdown);
+watch(() => props.darkMode, scheduleRenderMarkdown);
 
 // 组件挂载时渲染
 onMounted(() => {
   if (props.content) {
-    renderMarkdown();
+    scheduleRenderMarkdown();
   }
+});
+
+// KeepAlive 激活时（如果父组件使用 KeepAlive）
+onActivated(() => {
+  isActive.value = true;
+  if (props.content && !rendered.value) {
+    scheduleRenderMarkdown();
+  }
+});
+
+// KeepAlive 停用时
+onDeactivated(() => {
+  isActive.value = false;
+  renderVersion++;
 });
 
 // 组件销毁时清理
 onBeforeUnmount(() => {
   isDestroyed.value = true;
+  isActive.value = false;
+  // 递增版本号，取消正在进行的渲染操作
+  renderVersion++;
+  clearTimeout(renderTimer);
+  renderTimer = null;
 
   // 清理 DOM
   if (markdownContainer.value) {
     markdownContainer.value.innerHTML = "";
   }
-  console.log("MarkdownDisplay组件销毁");
+  log.debug("MarkdownDisplay组件销毁");
+});
+
+defineExpose({
+  // 暂停渲染
+  pause: () => {
+    isActive.value = false;
+    renderVersion++;
+  },
+  // 恢复渲染
+  resume: () => {
+    isActive.value = true;
+    if (props.content && !rendered.value) {
+      renderMarkdown();
+    }
+  },
 });
 </script>
 

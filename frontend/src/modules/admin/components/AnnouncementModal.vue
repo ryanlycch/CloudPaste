@@ -20,13 +20,7 @@
               <div class="flex items-center">
                 <!-- 公告图标 -->
                 <div class="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mr-3">
-                  <svg class="w-5 h-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fill-rule="evenodd"
-                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
+                  <IconInformationCircle size="md" class="text-blue-600 dark:text-blue-400" aria-hidden="true" />
                 </div>
                 <h3 :id="titleId" class="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
                   {{ t("announcement.title") }}
@@ -35,9 +29,7 @@
 
               <!-- 关闭按钮 -->
               <button @click="closeModal" class="text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400 transition-colors" :aria-label="t('common.close')">
-                <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <IconClose size="lg" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -58,13 +50,7 @@
                     class="w-4 h-4 border-2 rounded transition-colors flex items-center justify-center"
                     :class="dontShowAgain ? 'bg-blue-600 border-blue-600 dark:bg-blue-500 dark:border-blue-500' : 'border-gray-300 dark:border-gray-600'"
                   >
-                    <svg v-if="dontShowAgain" class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                      <path
-                        fill-rule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
+                    <IconCheck v-if="dontShowAgain" size="xs" class="w-2.5 h-2.5 text-white" aria-hidden="true" />
                   </div>
                 </div>
                 <span class="ml-2 text-xs sm:text-sm text-gray-600 dark:text-gray-400">
@@ -88,9 +74,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
+import { ref, computed, onMounted, watch, nextTick } from "vue";
+import { onKeyStroke } from "@vueuse/core";
+import { useLocalStorage } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
 import { loadVditor, VDITOR_ASSETS_BASE } from "@/utils/vditorLoader.js";
+import { IconCheck, IconClose, IconInformationCircle } from "@/components/icons";
+import { createLogger } from "@/utils/logger.js";
 
 const props = defineProps({
   content: {
@@ -101,6 +91,13 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // 是否在页面加载后自动弹出
+  // - true: 自动弹出（旧行为）
+  // - false: 不自动弹出（由父组件手动触发 open()）
+  autoOpen: {
+    type: Boolean,
+    default: true,
+  },
   darkMode: {
     type: Boolean,
     default: false,
@@ -108,6 +105,7 @@ const props = defineProps({
 });
 
 const { t } = useI18n();
+const log = createLogger("AnnouncementModal");
 const showModal = ref(false);
 const dontShowAgain = ref(false);
 const contentRef = ref(null);
@@ -118,6 +116,7 @@ const titleId = `announcement-title-${Math.random().toString(36).substr(2, 9)}`;
 // 用户关闭状态管理
 const STORAGE_KEY = "cloudpaste_announcement_dismissed";
 const MAX_DISMISSED_COUNT = 7; // 最多记住7个公告
+const dismissedState = useLocalStorage(STORAGE_KEY, "");
 
 // 生成内容唯一标识
 const getContentKey = (content) => {
@@ -133,18 +132,24 @@ const getContentKey = (content) => {
   return Math.abs(hash).toString(36); // 转换为36进制字符串
 };
 
+const contentKey = computed(() => getContentKey(props.content));
+
 // 检查是否已被用户关闭
 const isDismissed = (contentKey) => {
   if (!contentKey) return false;
-  const dismissed = localStorage.getItem(STORAGE_KEY);
-  return dismissed && dismissed.includes(contentKey);
+  return dismissedState.value && dismissedState.value.includes(contentKey);
 };
+
+// 是否存在“未读公告”（用于父组件显示红点等）
+const hasUnseenAnnouncement = computed(() => {
+  return !!(props.enabled && props.content && !isDismissed(contentKey.value));
+});
 
 // 标记为已关闭
 const markDismissed = (contentKey) => {
   if (!contentKey) return;
 
-  const dismissed = localStorage.getItem(STORAGE_KEY) || "";
+  const dismissed = dismissedState.value || "";
   let dismissedArray = dismissed ? dismissed.split(",").filter(Boolean) : [];
 
   // 添加新的哈希（如果不存在）
@@ -157,7 +162,7 @@ const markDismissed = (contentKey) => {
     dismissedArray = dismissedArray.slice(-MAX_DISMISSED_COUNT);
   }
 
-  localStorage.setItem(STORAGE_KEY, dismissedArray.join(","));
+  dismissedState.value = dismissedArray.join(",");
 };
 
 // 使用 Vditor 渲染 Markdown 内容
@@ -199,7 +204,7 @@ const renderContent = async () => {
       },
     });
   } catch (error) {
-    console.error("Vditor 渲染失败:", error);
+    log.error("Vditor 渲染失败:", error);
     // 降级到简单渲染
     if (contentRef.value) {
       contentRef.value.innerHTML = `<div class="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">${props.content}</div>`;
@@ -210,12 +215,19 @@ const renderContent = async () => {
 // 关闭弹窗
 const closeModal = () => {
   if (props.content) {
-    const contentKey = getContentKey(props.content);
     if (dontShowAgain.value) {
-      markDismissed(contentKey);
+      markDismissed(contentKey.value);
     }
   }
   showModal.value = false;
+};
+
+// 手动打开
+const open = async () => {
+  if (!props.enabled || !props.content) return;
+  showModal.value = true;
+  await nextTick();
+  renderContent();
 };
 
 // 背景点击关闭
@@ -224,17 +236,16 @@ const handleBackdropClick = () => {
 };
 
 // 键盘事件处理
-const handleKeydown = (event) => {
-  if (event.key === "Escape" && showModal.value) {
+onKeyStroke("Escape", () => {
+  if (showModal.value) {
     closeModal();
   }
-};
+});
 
 // 检查是否应该显示公告
 const checkShouldShow = async () => {
-  if (props.enabled && props.content) {
-    const contentKey = getContentKey(props.content);
-    if (!isDismissed(contentKey)) {
+  if (props.enabled && props.content && props.autoOpen) {
+    if (!isDismissed(contentKey.value)) {
       // 延迟显示，让页面先加载完成
       await nextTick();
       setTimeout(async () => {
@@ -249,11 +260,6 @@ const checkShouldShow = async () => {
 
 onMounted(() => {
   checkShouldShow();
-  document.addEventListener("keydown", handleKeydown);
-});
-
-onUnmounted(() => {
-  document.removeEventListener("keydown", handleKeydown);
 });
 
 // 监听 props 变化
@@ -273,6 +279,12 @@ watch(
     }
   }
 );
+
+defineExpose({
+  open,
+  close: closeModal,
+  hasUnseenAnnouncement,
+});
 </script>
 
 <style scoped>

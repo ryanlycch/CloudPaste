@@ -5,11 +5,15 @@ export interface FsDirectoryItem {
   path: string;
   isDirectory: boolean;
   isVirtual?: boolean;
-  size?: number;
-  modified?: string;
+  size?: number | null;
+  size_source?: "storage" | "index" | "compute" | "none" | null;
+  modified?: string | null;
+  modified_source?: "storage" | "index" | "compute" | "none" | null;
   mimetype?: string;
-  download_url?: string;
-  preview_url?: string;
+  mount_id?: string | number | null;
+  storage_type?: string | null;
+  type?: number;
+  typeName?: string;
 }
 
 export interface FsResolvedMeta {
@@ -23,6 +27,10 @@ export interface FsDirectoryResponse {
   items: FsDirectoryItem[];
   isVirtual?: boolean;
   mount_id?: string | number;
+  dirEtag?: string;
+  // 目录分页（游标模式）：主要用于上游分页接口
+  hasMore?: boolean;
+  nextCursor?: string | null;
   total?: number;
   pagination?: PaginationInfo;
   meta?: FsResolvedMeta | null;

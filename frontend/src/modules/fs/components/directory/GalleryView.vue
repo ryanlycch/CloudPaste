@@ -6,7 +6,7 @@
 <template>
   <div class="gallery-view">
     <!-- 现代化图廊工具栏 -->
-    <div class="gallery-toolbar mb-4" :class="darkMode ? 'bg-gray-800/80' : 'bg-white/90'">
+    <div ref="toolbarRef" class="gallery-toolbar mb-4" :class="darkMode ? 'bg-gray-800/80' : 'bg-white/90'">
       <!-- 主工具栏 -->
       <div class="px-3 py-2 border-b" :class="darkMode ? 'border-gray-700' : 'border-gray-200'">
         <div class="flex items-center justify-between">
@@ -14,14 +14,7 @@
           <div class="flex items-center gap-3">
             <div class="flex items-center gap-2">
               <!-- 图廊图标 -->
-              <svg class="w-5 h-5" :class="darkMode ? 'text-blue-400' : 'text-blue-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                />
-              </svg>
+              <IconGallery :class="darkMode ? 'text-blue-400' : 'text-blue-600'" aria-hidden="true" />
               <span class="font-medium text-sm" :class="darkMode ? 'text-gray-200' : 'text-gray-900'">
                 {{ t("gallery.viewModeName") }}
               </span>
@@ -45,13 +38,9 @@
                 class="flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors"
                 :class="darkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-700'"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-                </svg>
+                <IconSortAscending size="sm" aria-hidden="true" />
                 <span class="hidden sm:inline">{{ t("gallery.sort") }}</span>
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
+                <IconChevronDown size="xs" aria-hidden="true" />
               </button>
 
               <!-- 排序菜单 -->
@@ -88,14 +77,7 @@
               class="flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors"
               :class="darkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-700'"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"
-                />
-              </svg>
+              <IconAdjustments size="sm" aria-hidden="true" />
               <span class="hidden sm:inline">{{ t("gallery.settings") }}</span>
             </button>
           </div>
@@ -233,98 +215,99 @@
       </div>
     </div>
 
-    <!-- 瀑布流容器 -->
-    <MasonryWall
-      v-if="allImages.length > 0"
-      :items="masonryItems"
-      :column-width="columnWidth"
-      :gap="baseGap"
-      :min-columns="minColumns"
-      :max-columns="maxColumns"
-      :ssr-columns="1"
-      :key-mapper="(item, column, row, index) => item.id || index"
-      class="masonry-wall-gallery"
-    >
-      <template #default="{ item, index }">
-        <div class="masonry-item" @click="handleItemClick(item.image)" v-context-menu="(event) => handleContextMenu(event, item.image)">
-          <div class="masonry-image-container">
-            <!-- 选择框 -->
-            <div v-if="isCheckboxMode" class="absolute top-2 left-2 z-10" @click.stop="toggleItemSelect(item.image)">
-              <input
-                type="checkbox"
-                :checked="isItemSelected(item.image)"
-                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                :class="darkMode ? 'bg-gray-700 border-gray-500' : ''"
-              />
-            </div>
+    <!-- 瀑布流容器 + 渐进渲染哨兵 -->
+    <template v-if="allImages.length > 0">
+      <MasonryWall
+        :items="masonryItems"
+        :column-width="columnWidth"
+        :gap="baseGap"
+        :min-columns="minColumns"
+        :max-columns="maxColumns"
+        :ssr-columns="1"
+        :key-mapper="(item, column, row, index) => item.id || index"
+        class="masonry-wall-gallery"
+      >
+        <template #default="{ item }">
+          <div
+            class="masonry-item"
+            @click="handleItemClick(item.image)"
+            @contextmenu.prevent="(event) => handleContextMenu(event, item.image)"
+          >
+            <div class="masonry-image-container">
+              <!-- 选择框 -->
+              <div v-if="isCheckboxMode" class="absolute top-2 left-2 z-10" @click.stop="toggleItemSelect(item.image)">
+                <input
+                  type="checkbox"
+                  :checked="isItemSelected(item.image)"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  :class="darkMode ? 'bg-gray-700 border-gray-500' : ''"
+                />
+              </div>
 
-            <!-- 图片容器：始终渲染，实现真正的懒加载 -->
-            <div class="masonry-image-wrapper">
-              <!-- 真实图片：只有URL时才显示 -->
-              <img
-                v-if="getImageSrc(item.image)"
-                :src="getImageSrc(item.image)"
-                :alt="item.image.name"
-                class="masonry-image"
-                decoding="async"
-                @load="(event) => handleImageLoad(item.image, event)"
-                @error="handleImageError(item.image)"
-              />
-
-              <!-- 错误占位图：图片加载失败时显示 -->
-              <div v-else-if="getImageState(item.image)?.status === 'error'" class="masonry-placeholder bg-red-100 dark:bg-red-900/20" :style="getPlaceholderStyle()">
-                <div class="placeholder-content">
-                  <div class="w-8 h-8 mx-auto mb-2 opacity-50">
-                    <svg class="w-full h-full text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
-                      />
-                    </svg>
+              <!-- 图片容器：始终渲染，懒加载 -->
+              <div class="masonry-image-wrapper">
+                <!-- Live Photo 标志（仅展示，不触发播放；播放在灯箱/预览区处理）-->
+                <div v-if="isLivePhotoInGallery(item.image)" class="pointer-events-none" :class="{ 'live-photo-viewer--dark': darkMode }">
+                  <div class="live-photo-viewer__badge live-photo-viewer__badge--static" :title="t('livePhoto.badge')">
+                    <span v-html="livePhotoBadgeIconSvg" />
                   </div>
-                  <span class="text-xs opacity-75 text-red-600 dark:text-red-400"> {{ t("gallery.loadError") }} </span>
+                </div>
+
+                <!-- 真实图片：只有URL时才显示 -->
+                <img
+                  v-if="getImageSrc(item.image)"
+                  :src="getImageSrc(item.image)"
+                  :alt="item.image.name"
+                  class="masonry-image"
+                  decoding="async"
+                  @load="(event) => handleImageLoad(item.image, event)"
+                  @error="handleImageError(item.image)"
+                />
+
+                <!-- 错误占位图：图片加载失败时显示 -->
+                <div v-else-if="getImageState(item.image)?.status === 'error'" class="masonry-placeholder bg-red-100 dark:bg-red-900/20" :style="getPlaceholderStyle()">
+                  <div class="placeholder-content">
+                    <div class="w-8 h-8 mx-auto mb-2 opacity-50">
+                      <IconExclamation class="w-full h-full text-red-500" aria-hidden="true" />
+                    </div>
+                    <span class="text-xs opacity-75 text-red-600 dark:text-red-400"> {{ t("gallery.loadError") }} </span>
+                  </div>
+                </div>
+
+                <!-- 懒加载占位图：用于IntersectionObserver观察 -->
+                <div v-else class="masonry-placeholder lazy-image bg-gray-200 dark:bg-gray-700 animate-pulse" :data-image-path="item.image.path" :style="getPlaceholderStyle()">
+                  <div class="placeholder-content">
+                    <div class="w-8 h-8 mx-auto mb-2 opacity-50">
+                      <div v-html="getFileIcon(item.image, darkMode)" class="w-full h-full"></div>
+                    </div>
+                    <span class="text-xs opacity-75" :class="darkMode ? 'text-gray-400' : 'text-gray-600'"> {{ t("gallery.loading") }} </span>
+                  </div>
                 </div>
               </div>
 
-              <!-- 懒加载占位图：用于IntersectionObserver观察 -->
-              <div v-else class="masonry-placeholder lazy-image bg-gray-200 dark:bg-gray-700 animate-pulse" :data-image-path="item.image.path" :style="getPlaceholderStyle()">
-                <div class="placeholder-content">
-                  <div class="w-8 h-8 mx-auto mb-2 opacity-50">
-                    <div v-html="getFileIcon(item.image, darkMode)" class="w-full h-full"></div>
-                  </div>
-                  <span class="text-xs opacity-75" :class="darkMode ? 'text-gray-400' : 'text-gray-600'"> {{ t("gallery.loading") }} </span>
+              <!-- 悬浮操作层 - 现在使用上下文菜单 -->
+              <div class="masonry-overlay">
+                <!-- 图片信息（保留原有的悬浮信息） -->
+                <div class="masonry-info">
+                  <div class="text-sm font-medium truncate">{{ item.image.name }}</div>
+                  <div class="text-xs opacity-75 mt-1">{{ formatFileSize(item.image.size) }}</div>
                 </div>
-              </div>
-            </div>
-
-            <!-- 悬浮操作层 - 现在使用上下文菜单 -->
-            <div class="masonry-overlay">
-              <!-- 图片信息（保留原有的悬浮信息） -->
-              <div class="masonry-info">
-                <div class="text-sm font-medium truncate">{{ item.image.name }}</div>
-                <div class="text-xs opacity-75 mt-1">{{ formatFileSize(item.image.size) }}</div>
               </div>
             </div>
           </div>
-        </div>
-      </template>
-    </MasonryWall>
+        </template>
+      </MasonryWall>
+
+      <!-- 渐进渲染哨兵：进入视口时扩展渲染窗口 -->
+      <div v-if="hasMoreImages" ref="loadMoreSentinelRef" class="h-1"></div>
+    </template>
 
     <!-- 空状态提示 -->
     <div v-else class="text-center py-16">
       <div class="max-w-md mx-auto">
         <!-- 图片图标 -->
         <div class="w-24 h-24 mx-auto mb-6 opacity-30">
-          <svg class="w-full h-full" :class="darkMode ? 'text-gray-500' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-            />
-          </svg>
+          <IconGallery class="w-full h-full" :class="darkMode ? 'text-gray-500' : 'text-gray-400'" aria-hidden="true" />
         </div>
 
         <!-- 主要消息 -->
@@ -352,16 +335,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick, watch } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from "vue";
+import { onClickOutside, useIntersectionObserver } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
 import { useGalleryView } from "@/composables/ui-interaction/useGalleryView";
-import { usePhotoSwipe } from "@/composables/ui-interaction/usePhotoSwipe";
+import { useContextMenu } from "@/composables/useContextMenu";
+import { detectLivePhoto } from "@/utils/livePhotoUtils.js";
+import { IconAdjustments, IconChevronDown, IconExclamation, IconGallery, IconSortAscending } from "@/components/icons";
 import { getFileIcon } from "@/utils/fileTypeIcons";
 import { formatFileSize } from "@/utils/fileUtils";
 import MasonryWall from "@yeger/vue-masonry-wall";
-import ContextMenu from "@imengyu/vue3-context-menu";
+import "@/components/common/LivePhoto/LivePhotoViewer.css";
+import { LIVE_PHOTO_BADGE_ICON_SVG } from "@/components/common/LivePhoto/livePhotoBadgeIconSvg.js";
+import { useFsMediaLightbox } from "@/modules/fs/composables/useFsMediaLightbox";
 
 const { t } = useI18n();
+const livePhotoBadgeIconSvg = LIVE_PHOTO_BADGE_ICON_SVG;
 
 const props = defineProps({
   items: {
@@ -382,10 +371,18 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["item-click", "item-select", "download", "getLink", "rename", "delete", "show-message"]);
+const emit = defineEmits(["item-click", "item-select", "download", "getLink", "rename", "delete", "contextmenu", "show-message"]);
 
 // 使用图廊视图组合式函数
 const {
+  // 数据
+  allFolders,
+  allImages,
+  allOtherFiles,
+  masonryItems,
+  hasMoreImages,
+  loadMoreImages,
+
   // 设置状态
   columnCount,
   horizontalGap,
@@ -403,15 +400,9 @@ const {
   // 工具栏配置
   sortOptions,
 
-  // 图片数据处理
+  // 图片状态/加载
   imageStates,
-  createImageGroups,
-  createVisibleImages,
-  createMasonryItems,
-
-  // 图片URL管理
   loadImageUrl,
-  initializeImageStates,
 
   // 设置管理
   isDefaultSettings,
@@ -424,21 +415,89 @@ const {
 
   // 初始化方法
   setupWatchers,
-} = useGalleryView();
+  clearImageStates,
+  resetRenderWindow,
+} = useGalleryView({ items: computed(() => props.items) });
 
-// 使用PhotoSwipe图片预览组合式函数
-const { initPhotoSwipe, openPhotoSwipe, destroyPhotoSwipe } = usePhotoSwipe();
+const fsLightbox = useFsMediaLightbox();
+const toolbarRef = ref(null);
 
-// 使用composable中的数据处理方法
-const { allFolders, allImages, allOtherFiles } = createImageGroups(props.items);
+// 点击外部关闭菜单（VueUse 自动管理监听器与清理）
+onClickOutside(toolbarRef, () => {
+  if (!showSortMenu.value && !showViewSettings.value) return;
+  showSortMenu.value = false;
+  showViewSettings.value = false;
+});
 
-// 计算可见图片和相关状态
-const visibleImages = createVisibleImages(allImages);
-const masonryItems = createMasonryItems(visibleImages);
+// ===== 操作菜单相关方法 =====
+
+// 处理下载操作
+const handleDownload = (item) => {
+  emit("download", item);
+};
+
+// 处理获取链接操作
+const handleGetLink = (item) => {
+  emit("getLink", item);
+};
+
+// 处理重命名操作
+const handleRename = (item) => {
+  emit("rename", item);
+};
+
+// 处理删除操作
+const handleDelete = (items) => {
+  emit("delete", items);
+};
+
+// 处理复制操作 - 通过 contextmenu 事件传递
+const handleCopy = (items) => {
+  // 传递给父组件处理
+  emit("contextmenu", { 
+    event: null, 
+    item: Array.isArray(items) ? items[0] : items,
+    items: Array.isArray(items) ? items : [items],
+    action: 'copy'
+  });
+};
+
+// 处理添加到文件篮操作 - 通过 contextmenu 事件传递
+const handleAddToBasket = (items) => {
+  // 传递给父组件处理
+  emit("contextmenu", { 
+    event: null, 
+    item: Array.isArray(items) ? items[0] : items,
+    items: Array.isArray(items) ? items : [items],
+    action: 'add-to-basket'
+  });
+};
+
+// 处理切换勾选框显示 - 通过 contextmenu 事件传递
+const handleToggleCheckboxes = () => {
+  emit("contextmenu", { 
+    event: null, 
+    item: null,
+    items: [],
+    action: 'toggle-checkboxes'
+  });
+};
+
+// 初始化右键菜单（必须在操作函数定义之后）
+const contextMenu = useContextMenu({
+  onDownload: handleDownload,
+  onGetLink: handleGetLink,
+  onRename: handleRename,
+  onDelete: handleDelete,
+  onCopy: handleCopy,
+  onAddToBasket: handleAddToBasket,
+  onToggleCheckboxes: handleToggleCheckboxes,
+  t,
+});
 
 // 内容摘要 - 只显示图片统计
 const getContentSummary = () => {
-  const imageCount = allImages.length;
+  const imageCount = allImages.value.length;
 
   if (imageCount === 0) {
     return t("gallery.noImages");
@@ -465,13 +524,29 @@ const getImageState = (image) => {
   return imageStates.value.get(image.path);
 };
 
+// ===== Live Photo（图廊仅标识，不播放）=====
+
+const livePhotoInfoByPath = computed(() => {
+  const map = new Map();
+  for (const img of allImages.value) {
+    if (!img?.path) continue;
+    const result = detectLivePhoto(img, props.items);
+    map.set(img.path, {
+      isLive: !!result?.isLivePhoto,
+      videoPath: result?.videoFile?.path || "",
+    });
+  }
+  return map;
+});
+
+const isLivePhotoInGallery = (image) => {
+  if (!image?.path) return false;
+  return !!livePhotoInfoByPath.value.get(image.path)?.isLive;
+};
+
 const handleImageLoad = (image, event) => {
   const img = event.target;
   const aspectRatio = img.naturalWidth / img.naturalHeight;
-
-  // 🔍 检测图片是否来自缓存
-  const loadSource = img.complete && img.naturalWidth > 0 ? "可能来自缓存" : "网络加载";
-  console.log(`🖼️ 图片加载完成: ${image.name}, 尺寸: ${img.naturalWidth}x${img.naturalHeight}, 宽高比: ${aspectRatio.toFixed(2)}, 来源: ${loadSource}`);
 
   // 更新图片状态，添加尺寸信息
   const currentState = imageStates.value.get(image.path);
@@ -485,10 +560,18 @@ const handleImageLoad = (image, event) => {
   }
 };
 
-const handleImageError = (image) => {
-  console.error(`图片加载失败: ${image.name}`);
+// 图片加载失败：优先做一次“重新拉取 URL”（常见于预签名 URL 过期）
+const errorRetries = new Map(); // key: image.path => number
+let galleryAbortController = null;
 
-  // 设置错误状态
+const handleImageError = (image) => {
+  const current = errorRetries.get(image.path) || 0;
+  if (current < 1) {
+    errorRetries.set(image.path, current + 1);
+    imageStates.value.set(image.path, { status: "idle", url: null });
+    void loadImageUrl(image, { priority: "high", signal: galleryAbortController?.signal });
+    return;
+  }
   imageStates.value.set(image.path, { status: "error", url: null });
 };
 
@@ -496,72 +579,92 @@ const getPlaceholderStyle = () => {
   // 瀑布流占位符样式
   return {
     width: "100%",
-    height: "200px", // 固定高度，避免布局跳动
+    height: "200px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
   };
 };
 
-// 设备检测函数已在contextMenu指令中实现，这里不需要重复定义
+// 当前目录的图片索引
+const imagesByPath = computed(() => {
+  return new Map(allImages.value.map((img) => [img.path, img]));
+});
 
-// 上下文菜单处理
-const handleContextMenu = ({ x, y, isMobile }, image) => {
-  console.log(`${isMobile ? "📱 长按" : "🖱️ 右键"}触发上下文菜单:`, image.name);
-
-  // 构建菜单项
-  const menuItems = [
-    {
-      label: t("mount.fileItem.download"),
-      svgIcon: "#icon-download",
-      svgProps: {
-        width: "16",
-        height: "16",
-      },
-      onClick: () => handleDownload(image),
-    },
-    {
-      label: t("mount.fileItem.getLink"),
-      svgIcon: "#icon-link",
-      svgProps: {
-        width: "16",
-        height: "16",
-      },
-      onClick: () => handleGetLink(image),
-    },
-    {
-      label: t("mount.fileItem.rename"),
-      svgIcon: "#icon-edit",
-      svgProps: {
-        width: "16",
-        height: "16",
-      },
-      onClick: () => handleRename(image),
-    },
-    {
-      label: t("mount.fileItem.delete"),
-      svgIcon: "#icon-delete",
-      svgProps: {
-        width: "16",
-        height: "16",
-      },
-      onClick: () => handleDelete(image),
-    },
-  ];
-
-  // 显示上下文菜单
-  ContextMenu.showContextMenu({
-    x,
-    y,
-    items: menuItems,
-    theme: props.darkMode ? "default dark" : "default",
-    zIndex: 9999,
-    minWidth: 160,
+// 灯箱数据源
+const lightboxItems = computed(() => {
+  const infoMap = livePhotoInfoByPath.value;
+  return allImages.value.map((img) => {
+    const info = infoMap.get(img.path);
+    if (info?.isLive && info.videoPath) {
+      return {
+        ...img,
+        __cloudpasteLivePhotoVideoPath: info.videoPath,
+      };
+    }
+    return img;
   });
+});
+
+// 上下文菜单处理 - 使用统一的 useContextMenu
+const handleContextMenu = (event, image) => {
+  // 获取当前已选中的项目
+  const selectedFiles = props.selectedItems || [];
+  const isImageSelected = selectedFiles.some((i) => i.path === image.path);
+
+  let itemsForMenu;
+
+  if (selectedFiles.length > 0) {
+    // 有选中项时：
+    // - 如果右键的项目已在选中列表中，操作所有选中项目
+    // - 如果右键的项目不在选中列表中，只操作当前项目
+    if (isImageSelected) {
+      itemsForMenu = selectedFiles;
+    } else {
+      itemsForMenu = [image];
+    }
+  } else {
+    // 无选中项：只操作当前右键的项目
+    itemsForMenu = [image];
+  }
+
+  // 显示右键菜单（传递当前勾选框显示状态）
+  contextMenu.showContextMenu(event, image, itemsForMenu, props.darkMode, props.isCheckboxMode);
 };
 
-// 懒加载：IntersectionObserver实现
-const imageObserver = ref(null);
+// 懒加载：IntersectionObserver（VueUse）
+const lazyImageTargets = ref([]);
+const { stop: stopLazyImageObserver } = useIntersectionObserver(
+  lazyImageTargets,
+  (entries, observer) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+
+      const placeholder = /** @type {HTMLElement} */ (entry.target);
+      const imagePath = placeholder?.dataset?.imagePath;
+      if (!imagePath) return;
+
+      // 查找对应的图片对象
+      const image = imagesByPath.value.get(imagePath);
+      if (!image) return;
+
+      // 根据可见比例确定优先级
+      const priority = entry.intersectionRatio > 0.5 ? "high" : "normal";
+      void loadImageUrl(image, { priority, signal: galleryAbortController?.signal });
+
+      // 停止观察这个占位符，避免重复触发
+      try {
+        observer?.unobserve?.(placeholder);
+      } catch {
+        // ignore
+      }
+    });
+  },
+  {
+    rootMargin: "200px",
+    threshold: [0.1, 0.5],
+  }
+);
 
 // 定时器管理
 const timers = new Set();
@@ -576,126 +679,64 @@ const safeSetTimeout = (callback, delay) => {
   return id;
 };
 
-// 初始化图片懒加载Observer
+// 初始化/重置懒加载观察目标（Observer 实例由 VueUse 管理）
 const initImageLazyLoading = () => {
-  if (imageObserver.value) {
-    imageObserver.value.disconnect();
-  }
-
-  imageObserver.value = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          const placeholder = entry.target;
-          const imagePath = placeholder.dataset.imagePath;
-
-          if (imagePath) {
-            // 查找对应的图片对象
-            const image = allImages.find((img) => img.path === imagePath);
-            if (image) {
-              // 根据可见比例确定优先级
-              const priority = entry.intersectionRatio > 0.5 ? "high" : "normal";
-              console.log(`🔍 懒加载触发: ${image.name} (intersectionRatio: ${entry.intersectionRatio.toFixed(2)}, priority: ${priority})`);
-
-              // 触发图片URL加载，传递优先级
-              loadImageUrl(image, priority);
-              // 停止观察这个占位符
-              imageObserver.value.unobserve(placeholder);
-            }
-          }
-        }
-      });
-    },
-    {
-      rootMargin: "100px", // 增加提前加载范围，配合预加载策略
-      threshold: [0.1, 0.5], // 多个阈值：10%触发加载，50%触发高优先级
-    }
-  );
+  lazyImageTargets.value = [];
 };
 
 // 观察所有懒加载占位符（带重试机制）
 const observeLazyImages = (retryCount = 0) => {
-  if (!imageObserver.value) return;
-
   // 查找所有懒加载占位符
   const lazyPlaceholders = document.querySelectorAll(".lazy-image");
-  console.log(`🔍 找到 ${lazyPlaceholders.length} 个懒加载占位符 (尝试 ${retryCount + 1})`);
 
-  if (lazyPlaceholders.length === 0 && retryCount < 5) {
-    // 如果没有找到元素且重试次数未达上限，延迟重试
-    console.log(`⏳ MasonryWall可能还在渲染，${200 * (retryCount + 1)}ms后重试...`);
+  if (lazyPlaceholders.length === 0 && retryCount < 2) {
     safeSetTimeout(() => {
       observeLazyImages(retryCount + 1);
-    }, 200 * (retryCount + 1)); // 递增延迟：200ms, 400ms, 600ms...
+    }, 200 * (retryCount + 1));
     return;
   }
 
   if (lazyPlaceholders.length === 0) {
-    console.warn("❌ 重试5次后仍未找到懒加载占位符，可能存在渲染问题");
     return;
   }
 
-  let observedCount = 0;
+  /** @type {HTMLElement[]} */
+  const targets = [];
   lazyPlaceholders.forEach((placeholder) => {
     // 只观察还没有URL的图片
     const imagePath = placeholder.dataset.imagePath;
     const imageState = imageStates.value.get(imagePath);
     if (imageState?.status === "idle") {
-      imageObserver.value.observe(placeholder);
-      observedCount++;
-
-      // 检查占位符是否已经在视口内
-      const rect = placeholder.getBoundingClientRect();
-      const isInViewport = rect.top < window.innerHeight && rect.bottom > 0;
-      console.log(`📍 占位符位置 ${imagePath}: top=${Math.round(rect.top)}, bottom=${Math.round(rect.bottom)}, 视口高度=${window.innerHeight}, 在视口内=${isInViewport}`);
+      targets.push(/** @type {HTMLElement} */ (placeholder));
     }
   });
 
-  console.log(`👀 开始观察 ${observedCount}/${lazyPlaceholders.length} 个懒加载占位符`);
+  lazyImageTargets.value = targets;
 };
 
-// 点击外部关闭菜单
-const handleClickOutside = (event) => {
-  // 关闭工具栏菜单
-  if (!event.target.closest(".gallery-toolbar")) {
-    showSortMenu.value = false;
-    showViewSettings.value = false;
-  }
-};
-
-// 事件处理 - 集成PhotoSwipe预览
+// 事件处理 - 集成 PhotoSwipe 预览
 const handleItemClick = async (item) => {
-  // 如果是勾选模式，不触发预览
+  // 勾选模式：不触发预览
   if (props.isCheckboxMode) {
     toggleItemSelect(item);
     return;
   }
 
-  try {
-    console.log(`🔍 点击图片预览: ${item.name}`);
-
-    // 找到当前图片在所有图片中的索引
-    const currentIndex = allImages.findIndex((img) => img.path === item.path);
-
-    if (currentIndex === -1) {
-      console.warn(`⚠️ 无法找到图片索引: ${item.name}`);
-      // 降级到原有的预览方式
-      emit("item-click", item);
-      return;
-    }
-
-    // 使用PhotoSwipe打开图片预览
-    await openPhotoSwipe(
-      allImages, // 所有图片数组
-      currentIndex, // 当前图片索引
-      imageStates.value, // 图片状态管理
-      loadImageUrl // 图片URL加载函数
-    );
-  } catch (error) {
-    console.error("❌ PhotoSwipe预览失败:", error);
-    // 降级到原有的预览方式
+  const currentIndex = lightboxItems.value.findIndex((img) => img.path === item.path);
+  if (currentIndex === -1) {
     emit("item-click", item);
+    return;
   }
+
+  fsLightbox.open({
+    items: lightboxItems.value,
+    index: currentIndex,
+    darkMode: props.darkMode,
+    imageStates: imageStates.value,
+    loadImageUrl,
+    onDownload: (current) => emit("download", current),
+    onGetLink: (current) => emit("getLink", current),
+  });
 };
 
 const toggleItemSelect = (item) => {
@@ -704,28 +745,6 @@ const toggleItemSelect = (item) => {
 
 const isItemSelected = (item) => {
   return props.selectedItems.some((selected) => selected.path === item.path);
-};
-
-// ===== 操作菜单相关方法 =====
-
-// 处理下载操作
-const handleDownload = (image) => {
-  emit("download", image);
-};
-
-// 处理获取链接操作
-const handleGetLink = (image) => {
-  emit("getLink", image);
-};
-
-// 处理重命名操作
-const handleRename = (image) => {
-  emit("rename", image);
-};
-
-// 处理删除操作
-const handleDelete = (image) => {
-  emit("delete", image);
 };
 
 // 更新CSS变量以控制垂直间距（水平间距由MasonryWall的gap属性控制）
@@ -757,68 +776,59 @@ watch(
   { flush: "post" }
 );
 
-// 🔍 检查Service Worker状态
-const checkServiceWorkerStatus = async () => {
-  try {
-    if ("caches" in window) {
-      const galleryCache = await caches.open("gallery-images");
-      const cachedRequests = await galleryCache.keys();
-      console.log(`🖼️ 图廊缓存: ${cachedRequests.length} 张图片`);
-    }
-  } catch (error) {
-    console.log("📡 图廊缓存: 0 张图片");
-  }
-};
+// 渐进渲染：观察底部哨兵，按需扩展渲染窗口
+const loadMoreSentinelRef = ref(null);
+const { stop: stopLoadMoreObserver } = useIntersectionObserver(
+  loadMoreSentinelRef,
+  (entries) => {
+    const entry = entries?.[0];
+    if (!entry?.isIntersecting) return;
+    if (!hasMoreImages.value) return;
+    loadMoreImages();
+    nextTick(() => observeLazyImages());
+  },
+  { rootMargin: "800px" }
+);
 
 // 生命周期
 onMounted(() => {
-  // 设置监听器
   setupWatchers();
+  galleryAbortController = new AbortController();
 
-  // 初始化真正的懒加载
-  nextTick(async () => {
-    console.log(`📊 初始化图片状态，所有图片数量: ${visibleImages.value.length}`);
-    console.log(`📊 allImages数量: ${allImages.length}`);
-    console.log(`📊 懒加载模式：所有图片都会渲染占位符，由IntersectionObserver控制加载`);
-
-    // 🔍 检查Service Worker状态
-    await checkServiceWorkerStatus();
-
-    initializeImageStates(visibleImages.value);
-    // 初始化CSS变量
+  nextTick(() => {
     updateSpacingCSSVariables();
-    // 初始化图片懒加载Observer
     initImageLazyLoading();
-    // 初始化PhotoSwipe
-    initPhotoSwipe();
   });
 
-  // 延迟观察懒加载图片，等待MasonryWall完全渲染
-  safeSetTimeout(() => {
-    console.log(`🔍 开始查找懒加载占位符...`);
-    observeLazyImages();
-  }, 100);
-
-  // 添加点击外部关闭菜单的监听器
-  document.addEventListener("click", handleClickOutside);
+  safeSetTimeout(() => observeLazyImages(), 100);
 });
 
-// 清理事件监听器
-onBeforeUnmount(() => {
-  document.removeEventListener("click", handleClickOutside);
+// 目录切换/刷新：取消在途加载，避免旧目录请求回写到新目录的状态
+watch(
+  () => props.items,
+  () => {
+    errorRetries.clear();
+    galleryAbortController?.abort();
+    galleryAbortController = new AbortController();
+    initImageLazyLoading();
+    nextTick(() => {
+      observeLazyImages();
+    });
+  }
+);
 
-  // 清理所有定时器
+onBeforeUnmount(() => {
   timers.forEach((id) => clearTimeout(id));
   timers.clear();
 
-  // 清理IntersectionObserver
-  if (imageObserver.value) {
-    imageObserver.value.disconnect();
-    imageObserver.value = null;
-  }
+  stopLazyImageObserver?.();
+  stopLoadMoreObserver?.();
 
-  // 清理PhotoSwipe
-  destroyPhotoSwipe();
+  galleryAbortController?.abort();
+  galleryAbortController = null;
+
+  clearImageStates();
+  resetRenderWindow();
 });
 </script>
 

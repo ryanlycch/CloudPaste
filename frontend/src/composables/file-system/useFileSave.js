@@ -5,9 +5,11 @@
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { api } from "@/api";
+import { createLogger } from "@/utils/logger.js";
 
 export function useFileSave() {
   const { t } = useI18n();
+  const log = createLogger("FileSave");
 
   // 保存状态
   const isSaving = ref(false);
@@ -26,30 +28,18 @@ export function useFileSave() {
       isSaving.value = true;
       saveError.value = null;
 
-      console.log("保存文件:", {
+      log.debug("保存文件:", {
         filePath,
         fileName,
         contentLength: content.length,
         currentPath,
       });
 
-      // 将文本内容转换为File对象
-      const textBlob = new Blob([content], { type: 'text/plain; charset=utf-8' });
-      const textFile = new File([textBlob], fileName, { 
-        type: 'text/plain',
-        lastModified: Date.now()
-      });
-
-      // 使用现有的上传API
-      const response = await api.fs.uploadFile(
-        currentPath, 
-        textFile, 
-        false 
-      );
+      const response = await api.fs.updateFile(filePath, content);
 
       if (response && response.success) {
-        console.log("文件保存成功:", response);
-        
+        log.debug("文件保存成功:", response);
+
         return {
           success: true,
           message: t("mount.messages.fileSaveSuccess", { name: fileName }),
@@ -60,7 +50,7 @@ export function useFileSave() {
       }
       
     } catch (error) {
-      console.error("保存文件失败:", error);
+      log.error("保存文件失败:", error);
       saveError.value = error.message || t("mount.messages.fileSaveFailed");
       
       return {

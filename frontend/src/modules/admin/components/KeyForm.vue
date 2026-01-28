@@ -7,6 +7,8 @@ import { useFsService } from "@/modules/fs";
 import { useAdminApiKeyService } from "@/modules/admin/services/apiKeyService.js";
 import { useAdminMountService } from "@/modules/admin/services/mountService.js";
 import { useAdminStorageConfigService } from "@/modules/admin/services/storageConfigService.js";
+import { IconClose, IconFolder, IconHome, IconRefresh } from "@/components/icons";
+import { createLogger } from "@/utils/logger.js";
 
 // 目录缓存对象，用于存储已加载的目录内容
 const directoryCache = shallowRef(new Map());
@@ -15,6 +17,7 @@ const fsService = useFsService();
 const { getAllApiKeys, updateApiKey, createApiKey, getApiKeyStorageAcl, updateApiKeyStorageAcl } = useAdminApiKeyService();
 const { getMountsList } = useAdminMountService();
 const { getStorageConfigs } = useAdminStorageConfigService();
+const log = createLogger("KeyForm");
 
 // 创建目录项组件，用于递归展示目录树
 const DirectoryItemVue = {
@@ -89,7 +92,7 @@ const DirectoryItemVue = {
                 });
               }
             } catch (err) {
-              console.error("加载目录失败:", err);
+              log.error("加载目录失败:", err);
             }
           }
 
@@ -99,7 +102,7 @@ const DirectoryItemVue = {
         // 更新缓存
         directoryCache.value.set(cacheKey, dirItems);
       } catch (error) {
-        console.error("加载目录失败:", error);
+        log.error("加载目录失败:", error);
         children.value = [];
       } finally {
         loading.value = false;
@@ -255,30 +258,7 @@ const DirectoryItemVue = {
                     style: { paddingLeft: `${(this.level + 1) * 0.75 + 0.75}rem` },
                   },
                   [
-                    h(
-                      "svg",
-                      {
-                        class: "animate-spin h-3 w-3 mr-1",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        fill: "none",
-                        viewBox: "0 0 24 24",
-                      },
-                      [
-                        h("circle", {
-                          class: "opacity-25",
-                          cx: "12",
-                          cy: "12",
-                          r: "10",
-                          stroke: "currentColor",
-                          "stroke-width": "4",
-                        }),
-                        h("path", {
-                          class: "opacity-75",
-                          fill: "currentColor",
-                          d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z",
-                        }),
-                      ]
-                    ),
+                    h(IconRefresh, { class: "animate-spin h-3 w-3 mr-1", "aria-hidden": "true" }),
                     h("span", { class: "text-xs" }, "加载中..."),
                   ]
                 )
@@ -467,7 +447,7 @@ const loadStorageAclForKey = async (keyId) => {
     const ids = await getApiKeyStorageAcl(keyId);
     selectedStorageConfigIds.value = Array.isArray(ids) ? ids : [];
   } catch (error) {
-    console.error("加载存储 ACL 失败:", error);
+    log.error("加载存储 ACL 失败:", error);
     selectedStorageConfigIds.value = [];
   }
 };
@@ -575,7 +555,7 @@ const loadMounts = async () => {
       const { items } = await getStorageConfigs();
       storageConfigItems = Array.isArray(items) ? items : [];
     } catch (storageError) {
-      console.error("加载存储配置列表失败:", storageError);
+      log.error("加载存储配置列表失败:", storageError);
     }
 
     // 仅公开的存储配置用于 ACL 选择和挂载过滤（与后端行为保持一致）
@@ -604,7 +584,7 @@ const loadMounts = async () => {
 
     applyAclToMounts();
   } catch (error) {
-    console.error("加载挂载点列表失败:", error);
+    log.error("加载挂载点列表失败:", error);
     mountsList.value = [];
     rootDirectories.value = [];
   } finally {
@@ -632,7 +612,7 @@ const confirmPathSelection = () => {
 // 初始化时预加载可用的存储配置（供桶 ACL 选择使用）
 onMounted(() => {
   loadMounts().catch((error) => {
-    console.error("初始化加载存储配置和挂载点失败:", error);
+    log.error("初始化加载存储配置和挂载点失败:", error);
   });
 });
 
@@ -766,7 +746,7 @@ const handleSubmit = async () => {
       resetForm();
     }
   } catch (e) {
-    console.error("API密钥操作失败:", e);
+    log.error("API密钥操作失败:", e);
     error.value =
       e.message ||
       (props.isEditMode
@@ -808,13 +788,7 @@ defineExpose({
         :class="darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'"
       >
         <span class="sr-only">{{ $t("admin.keyManagement.createModal.close") }}</span>
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-          <path
-            fill-rule="evenodd"
-            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-            clip-rule="evenodd"
-          />
-        </svg>
+        <IconClose size="md" />
       </button>
     </div>
 
@@ -1142,12 +1116,10 @@ defineExpose({
             <button
               @click="switchToPathTab"
               class="px-2 py-0 rounded-r-md text-white h-[42px]"
-              :class="darkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'"
-              :title="$t(isEditMode ? 'admin.keyManagement.editModal.selectPath' : 'admin.keyManagement.createModal.selectPath', '选择路径')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
+            :class="darkMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'"
+            :title="$t(isEditMode ? 'admin.keyManagement.editModal.selectPath' : 'admin.keyManagement.createModal.selectPath', '选择路径')"
+          >
+              <IconFolder size="md" />
             </button>
           </div>
           <p class="mt-1 text-sm" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">
@@ -1261,14 +1233,7 @@ defineExpose({
         <div class="border rounded-md overflow-hidden mb-4 h-64" :class="darkMode ? 'border-gray-700' : 'border-gray-300'">
           <!-- 加载状态 -->
           <div v-if="isLoadingMounts" class="h-full flex justify-center items-center" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">
-            <svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
+            <IconRefresh size="md" class="animate-spin mr-2" />
             <span>{{ $t(isEditMode ? "admin.keyManagement.editModal.pathSelector.loading" : "admin.keyManagement.createModal.pathSelector.loading", "加载中...") }}</span>
           </div>
 
@@ -1281,21 +1246,7 @@ defineExpose({
                   class="flex items-center py-2 px-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
                   :class="{ 'bg-blue-50 dark:bg-blue-900/30': selectedPath === '/' }"
                 >
-                  <svg
-                    class="h-4 w-4 flex-shrink-0 mr-2"
-                    :class="darkMode ? 'text-blue-400' : 'text-blue-600'"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke-width="2"
-                    stroke="currentColor"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
-                    />
-                  </svg>
+                  <IconHome size="sm" class="flex-shrink-0 mr-2" :class="darkMode ? 'text-blue-400' : 'text-blue-600'" />
                   <span class="truncate" :class="[darkMode ? 'text-gray-200' : 'text-gray-700', selectedPath === '/' ? 'font-medium text-blue-600 dark:text-blue-400' : '']">
                     {{ $t(isEditMode ? "admin.keyManagement.editModal.pathSelector.rootDirectory" : "admin.keyManagement.createModal.pathSelector.rootDirectory", "根目录") }}
                   </span>

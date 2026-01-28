@@ -3,9 +3,7 @@
     <div class="absolute inset-0 bg-black opacity-50" @click="closeModal"></div>
     <div class="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-lg max-w-md w-full relative z-10">
       <button @click="closeModal" class="absolute top-3 right-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
+        <IconClose size="lg" aria-hidden="true" />
       </button>
 
       <h3 class="text-lg font-medium mb-4 text-gray-900 dark:text-gray-100">{{ $t("markdown.qrCodeTitle") }}</h3>
@@ -32,8 +30,11 @@
 import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { generateQRCode as createQRCodeImage } from "@/utils/qrcodeUtils.js";
+import { IconClose } from "@/components/icons";
+import { createLogger } from "@/utils/logger.js";
 
 const { t } = useI18n();
+const log = createLogger("QRCodeModal");
 
 // Props
 const props = defineProps({
@@ -63,7 +64,7 @@ const generateQRCode = async (url) => {
     const dataURL = await createQRCodeImage(url, { width: 240, margin: 1 });
     qrCodeDataURL.value = dataURL;
   } catch (error) {
-    console.error("生成二维码时出错:", error);
+    log.error("生成二维码时出错:", error);
     emit("status-message", t("markdown.messages.qrCodeGenerateFailed"));
   }
 };

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import adminRoutes from "./routes/adminRoutes.js";
+import adminFsIndexRoutes from "./routes/adminFsIndexRoutes.js";
 import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import { backupRoutes } from "./routes/backupRoutes.js";
 
@@ -17,10 +18,12 @@ import shareUploadRoutes from "./routes/shareUploadRoutes.js";
 import pastesRoutes from "./routes/pastesRoutes.js";
 import fileViewRoutes from "./routes/fileViewRoutes.js";
 import { fsProxyRoutes } from "./routes/fsProxyRoutes.js";
+import { proxyLinkRoutes } from "./routes/proxyLinkRoutes.js";
+import scheduledRoutes from "./routes/scheduledRoutes.js";
 import { securityContext } from "./security/middleware/securityContext.js";
 import { withRepositories } from "./utils/repositories.js";
 import { errorBoundary } from "./http/middlewares/errorBoundary.js";
-import { normalizeError } from "./http/errors.js";
+import { normalizeError, sanitizeErrorMessageForClient } from "./http/errors.js";
 
 const getTimeSource = () => {
   if (typeof performance !== "undefined" && typeof performance.now === "function") {
@@ -101,9 +104,6 @@ const app = new Hono();
 
 // 注册中间件
 app.use("*", structuredLogger);
-app.use("*", errorBoundary());
-app.use("*", withRepositories());
-app.use("*", securityContext());
 // 导入WebDAV配置
 import { WEBDAV_BASE_PATH } from "./webdav/auth/config/WebDAVConfig.js";
 
@@ -126,8 +126,11 @@ app.use("*", async (c, next) => {
       allowHeaders: [
         "Content-Type",
         "Authorization",
+        "Range",
         "X-API-KEY",
         "X-FS-Path-Token",
+        "X-FS-Path-Tokens",
+        "X-Custom-Auth-Key",
         "Depth",
         "Destination",
         "Overwrite",
@@ -136,11 +139,17 @@ app.use("*", async (c, next) => {
         "If-Modified-Since",
         "If-Unmodified-Since",
         "Lock-Token",
+        "Content-Range",
         "Content-Length",
         "X-Requested-With",
+        // FS / Share 流式上传自定义头
+        "X-FS-Filename",
+        "X-FS-Options",
+        "X-Share-Filename",
+        "X-Share-Options",
       ],
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "HEAD"],
-      exposeHeaders: ["ETag", "Content-Length", "Content-Disposition", "Content-Range", "Accept-Ranges"],
+      exposeHeaders: ["ETag", "Content-Length", "Content-Disposition", "Content-Range", "Accept-Ranges", "X-Request-Id"],
       maxAge: 86400,
       credentials: true,
     });
@@ -148,6 +157,10 @@ app.use("*", async (c, next) => {
     return await corsMiddleware(c, next);
   }
 });
+
+app.use("*", errorBoundary());
+app.use("*", withRepositories());
+app.use("*", securityContext());
 
 // 根路径WebDAV OPTIONS兼容性处理器
 // 为1Panel等客户端提供WebDAV能力发现支持
@@ -171,6 +184,7 @@ app.options("/", (c) => {
 
 // 注册路由
 app.route("/", adminRoutes);
+app.route("/", adminFsIndexRoutes);
 app.route("/", apiKeyRoutes);
 app.route("/", backupRoutes);
 app.route("/", fileViewRoutes);
@@ -184,6 +198,8 @@ app.route("/", webdavRoutes);
 app.route("/", fsRoutes);
 app.route("/", fsMetaRoutes);
 app.route("/", fsProxyRoutes);
+app.route("/", proxyLinkRoutes);
+app.route("/", scheduledRoutes);
 
 // 健康检查路由
 app.get("/api/health", (c) => {
@@ -200,11 +216,16 @@ app.onError((err, c) => {
   console.error(`[错误] ${normalized.publicMessage}`, err);
   const reqId = c.get("reqId");
   if (reqId) c.header("X-Request-Id", String(reqId));
+  const debugMessage = normalized.expose ? null : sanitizeErrorMessageForClient(normalized.originalError?.message || err);
   return c.json(
     createErrorResponse(
       normalized.status,
       normalized.expose ? normalized.publicMessage : "服务器内部错误",
-      normalized.code
+      normalized.code,
+      {
+        ...(reqId ? { requestId: String(reqId) } : {}),
+        ...(debugMessage ? { debugMessage } : {}),
+      }
     ),
     normalized.status
   );

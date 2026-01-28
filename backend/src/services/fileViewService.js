@@ -7,8 +7,10 @@ import { ensureRepositoryFactory } from "../utils/repositories.js";
 import { verifyPassword } from "../utils/crypto.js";
 import { getEffectiveMimeType, getContentTypeAndDisposition } from "../utils/fileUtils.js";
 import { getFileBySlug, isFileAccessible } from "./fileService.js";
+import { ObjectStore } from "../storage/object/ObjectStore.js";
+import { StorageStreaming, STREAMING_CHANNELS } from "../storage/streaming/index.js";
 import { StorageFactory } from "../storage/factory/StorageFactory.js";
-import { StorageConfigUtils } from "../storage/utils/StorageConfigUtils.js";
+import { FILE_TYPES, UserType } from "../constants/index.js";
 
 /**
  * 文件查看服务类
@@ -26,37 +28,6 @@ export class FileViewService {
   }
 
   /**
-   * 增加文件查看次数并检查是否超过限制
-   * @param {Object} file - 文件对象
-   * @returns {Promise<Object>} 包含更新后的文件信息和状态
-   */
-  async incrementAndCheckFileViews(file) {
-    // 使用 FileRepository 递增访问计数
-    const fileRepository = this.repositoryFactory.getFileRepository();
-
-    await fileRepository.incrementViews(file.id);
-
-    // 重新获取更新后的文件信息（包含存储配置）
-    const updatedFile = await fileRepository.findByIdWithStorageConfig(file.id);
-
-    // 检查是否超过最大访问次数
-    if (updatedFile.max_views && updatedFile.max_views > 0 && updatedFile.views > updatedFile.max_views) {
-      // 已超过最大查看次数，执行删除
-      await this.checkAndDeleteExpiredFile(updatedFile);
-      return {
-        isExpired: true,
-        reason: "max_views",
-        file: updatedFile,
-      };
-    }
-
-    return {
-      isExpired: false,
-      file: updatedFile,
-    };
-  }
-
-  /**
    * 检查并删除过期文件
    * @param {Object} file - 文件对象
    */
@@ -64,17 +35,20 @@ export class FileViewService {
     try {
       console.log(`开始删除过期文件: ${file.id}`);
 
-      // 通过 Driver 按存储路径删除对象
-      if (file.storage_path && file.storage_config_id && file.storage_type) {
+      // 通过 ObjectStore 按存储路径删除对象
+      //
+      // 1) “上传即分享”（share upload / storage-first）：file_path 通常为空，这类过期应删除真实存储对象
+      // 2) “从文件系统创建分享”（fs -> share）：file_path 有值，表示引用的是网盘里的真实文件
+      //    这种场景下“分享过期”只应该删除分享记录，不应该删除真实网盘文件。
+      const shouldDeleteStorageObject = !file.file_path;
+
+      if (shouldDeleteStorageObject && file.storage_path && file.storage_config_id && file.storage_type) {
         try {
-          const config = await StorageConfigUtils.getStorageConfig(this.db, file.storage_type, file.storage_config_id);
-          const driver = await StorageFactory.createDriver(file.storage_type, config, this.encryptionSecret);
-          if (typeof driver.deleteObjectByStoragePath === "function") {
-            await driver.deleteObjectByStoragePath(file.storage_path, { db: this.db });
-            console.log(`已从存储删除文件: ${file.storage_path}`);
-          }
+          const objectStore = new ObjectStore(this.db, this.encryptionSecret, this.repositoryFactory);
+          await objectStore.deleteByStoragePath(file.storage_config_id, file.storage_path, { db: this.db });
+          console.log(`已从存储删除文件: ${file.storage_path}`);
         } catch (e) {
-          console.warn("删除存储对象失败（已忽略以完成记录删除）:", e?.message || e);
+        console.warn("删除存储对象失败（已忽略以完成记录删除）:", e?.message || e);
         }
       }
 
@@ -96,7 +70,7 @@ export class FileViewService {
    * @param {boolean} forceDownload - 是否强制下载
    * @returns {Promise<Response>} 响应对象
    */
-  async handleFileDownload(slug, request, forceDownload = false) {
+  async handleFileDownload(slug, request, forceDownload = false, options = {}) {
     try {
       // 查询文件详情
       const file = await getFileBySlug(this.db, slug, this.encryptionSecret);
@@ -158,83 +132,116 @@ export class FileViewService {
         return new Response("文件存储信息不完整", { status: 404 });
       }
 
-      // 获取文件的MIME类型
-      const contentType = getEffectiveMimeType(result.file.mimetype, result.file.filename);
+      const fileRecord = result.file;
+      const useProxyFlag = fileRecord.use_proxy ?? 0;
+      const forceProxy = options && options.forceProxy === true;
 
-      // 通过 Driver 生成直链（按存储路径）
-      let presignedUrl = null;
-      try {
-        const config = await StorageConfigUtils.getStorageConfig(this.db, result.file.storage_type, result.file.storage_config_id);
-        const driver = await StorageFactory.createDriver(result.file.storage_type, config, this.encryptionSecret);
-        if (typeof driver.generateDownloadUrlByStoragePath === "function") {
-          presignedUrl = await driver.generateDownloadUrlByStoragePath(result.file.storage_path, {
-            forceDownload,
-            contentType,
-          });
+      // 文本类预览优先走本地代理，以避免直链 CORS 与内容类型差异
+      const isInline = !forceDownload;
+      const isTextLike =
+        fileRecord.type === FILE_TYPES.TEXT ||
+        (fileRecord.mimetype && fileRecord.mimetype.startsWith("text/"));
+
+      // 抽取本地代理下载逻辑，便于在直链失败时复用
+      // 使用 StorageStreaming 层统一处理
+      const proxyDownload = async () => {
+        const parseOwnerFromCreatedBy = (createdBy) => {
+          const raw = typeof createdBy === "string" ? createdBy.trim() : "";
+          if (!raw || raw === "anonymous") return null;
+          if (raw.startsWith("apikey:")) {
+            const id = raw.slice("apikey:".length).trim();
+            if (!id) return null;
+            return { ownerType: UserType.API_KEY, ownerId: id };
+          }
+          // 默认视为 admin 创建的分享
+          return { ownerType: UserType.ADMIN, ownerId: raw };
+        };
+
+        const owner = parseOwnerFromCreatedBy(fileRecord.created_by);
+
+        // 处理 Range 请求
+        const rangeHeader = request.headers.get("Range");
+        if (rangeHeader) {
+          console.log(`分享下载 - 代理 Range 请求: ${rangeHeader}`);
         }
+
+        // 使用 StorageStreaming 层统一处理内容访问
+        const streaming = new StorageStreaming({
+          mountManager: null, // 存储路径模式不需要 mountManager
+          storageFactory: StorageFactory,
+          encryptionSecret: this.encryptionSecret,
+        });
+
+        const response = await streaming.createResponse({
+          path: fileRecord.storage_path,
+          channel: STREAMING_CHANNELS.SHARE,
+          storageConfigId: fileRecord.storage_config_id,
+          rangeHeader,
+          request,
+          db: this.db,
+          repositoryFactory: this.repositoryFactory,
+          ...(owner ? owner : null),
+        });
+
+        // 基于文件记录重新计算 Content-Type / Content-Disposition，保持分享层一致性
+        const { contentType: finalContentType, contentDisposition } = getContentTypeAndDisposition(
+          fileRecord.filename,
+          fileRecord.mimetype,
+          { forceDownload }
+        );
+
+        // 更新响应头
+        response.headers.set("Content-Type", finalContentType);
+        response.headers.set("Content-Disposition", contentDisposition);
+
+        // 设置CORS头部
+        response.headers.set("Access-Control-Allow-Origin", "*");
+        response.headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+        response.headers.set("Access-Control-Allow-Headers", "Range, Content-Type");
+        response.headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+
+        return response;
+      };
+
+      // forceProxy=true 时，强制只走本地代理（share 的 /api/s 与 /api/share/content）
+      if (forceProxy) {
+        return await proxyDownload();
+      }
+
+      // 文本类 inline 预览，无论 use_proxy 配置如何，都优先走本地代理访问
+      if (isInline && isTextLike) {
+        return await proxyDownload();
+      }
+
+      // use_proxy = 1 时，走本地代理访问
+      if (useProxyFlag === 1) {
+        return await proxyDownload();
+      }
+
+      // use_proxy != 1 时，优先尝试直链：S3 custom_host 优先，其次驱动 DirectLink 能力（例如预签名 URL）
+      let directUrl = null;
+      try {
+        const objectStore = new ObjectStore(this.db, this.encryptionSecret, this.repositoryFactory);
+        const links = await objectStore.generateLinksByStoragePath(fileRecord.storage_config_id, fileRecord.storage_path, {
+          forceDownload,
+        });
+        directUrl = links?.download?.url || links?.preview?.url || null;
       } catch (e) {
         console.error("生成存储直链失败:", e);
       }
 
-      if (!presignedUrl) {
-        return new Response("当前存储不支持直链下载", { status: 501 });
+      if (directUrl) {
+        const redirectHeaders = new Headers();
+        redirectHeaders.set("Location", directUrl);
+
+        return new Response(null, {
+          status: 302,
+          headers: redirectHeaders,
+        });
       }
 
-      //处理Range请求
-      const rangeHeader = request.headers.get("Range");
-      const fileRequestHeaders = {};
-
-      // 如果有Range请求，转发给S3
-      if (rangeHeader) {
-        fileRequestHeaders["Range"] = rangeHeader;
-        console.log(`🎬 代理Range请求: ${rangeHeader}`);
-      }
-
-      // 代理请求到实际的文件URL
-      const fileRequest = new Request(presignedUrl, {
-        headers: fileRequestHeaders,
-      });
-
-      const fileResponse = await fetch(fileRequest);
-
-      if (!fileResponse.ok) {
-        console.error(`获取文件失败: ${fileResponse.status} ${fileResponse.statusText}`);
-        return new Response("获取文件失败", { status: fileResponse.status });
-      }
-
-      // 获取内容类型和处置方式
-      const { contentType: finalContentType, contentDisposition } = getContentTypeAndDisposition(result.file.filename, result.file.mimetype, { forceDownload: forceDownload });
-
-      // 创建响应头
-      const responseHeaders = new Headers();
-
-      // 设置内容类型
-      responseHeaders.set("Content-Type", finalContentType);
-
-      // 设置内容处置
-      responseHeaders.set("Content-Disposition", contentDisposition);
-
-      // 复制原始响应的其他相关头部
-      const headersToProxy = ["Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag", "Cache-Control"];
-      headersToProxy.forEach((header) => {
-        const value = fileResponse.headers.get(header);
-        if (value) {
-          responseHeaders.set(header, value);
-        }
-      });
-
-      // 设置CORS头部
-      responseHeaders.set("Access-Control-Allow-Origin", "*");
-      responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-      responseHeaders.set("Access-Control-Allow-Headers", "Range, Content-Type");
-      responseHeaders.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
-
-      // 返回代理响应
-      return new Response(fileResponse.body, {
-        status: fileResponse.status,
-        statusText: fileResponse.statusText,
-        headers: responseHeaders,
-      });
+      // 直链不可用时回退为本地代理访问，避免 501，保证“反代访问”场景下始终可用
+      return await proxyDownload();
     } catch (error) {
       console.error("代理文件下载出错:", error);
       return new Response("获取文件失败: " + error.message, { status: 500 });
@@ -243,9 +250,17 @@ export class FileViewService {
 }
 
 // 导出便捷函数供路由使用
-export async function handleFileDownload(slug, db, encryptionSecret, request, forceDownload = false, repositoryFactory = null) {
+export async function handleFileDownload(
+  slug,
+  db,
+  encryptionSecret,
+  request,
+  forceDownload = false,
+  repositoryFactory = null,
+  options = {},
+) {
   const service = new FileViewService(db, encryptionSecret, repositoryFactory);
-  return service.handleFileDownload(slug, request, forceDownload);
+  return service.handleFileDownload(slug, request, forceDownload, options);
 }
 
 export async function checkAndDeleteExpiredFile(db, file, encryptionSecret, repositoryFactory = null) {

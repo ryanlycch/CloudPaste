@@ -16,16 +16,25 @@
       @save="handleSave"
     />
     <div v-else class="loading-indicator">
-      <div class="loading-spinner" :class="darkMode ? 'border-primary-500' : 'border-primary-600'"></div>
-      <p class="loading-text" :class="darkMode ? 'text-gray-400' : 'text-gray-600'">{{ $t("mount.textPreview.loadingText") }}</p>
+      <LoadingIndicator
+        :text="$t('mount.textPreview.loadingText')"
+        :dark-mode="darkMode"
+        size="xl"
+        :icon-class="darkMode ? 'text-primary-500' : 'text-primary-600'"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import TextRenderer from "@/components/common/text-preview/TextRenderer.vue";
 import { useTextPreview } from "@/composables/text-preview/useTextPreview.js";
+import { usePathPassword } from "@/composables/usePathPassword.js";
+import LoadingIndicator from "@/components/common/LoadingIndicator.vue";
+import { createLogger } from "@/utils/logger.js";
+
+const log = createLogger("FsTextPreview");
 
 // Props 定义
 const props = defineProps({
@@ -100,12 +109,14 @@ const {
   emitEncodingChange: true,
 });
 
+// 路径密码管理，用于为受保护路径的内容请求附加 token
+const pathPassword = usePathPassword();
+
 // 为了兼容性，保留 fileData 计算属性
 const fileData = computed(() => currentFileData.value);
 
 const handleEncodingChange = async (newEncoding) => {
   currentEncoding.value = newEncoding;
-  console.log("文本编码切换:", newEncoding);
 
   // 使用统一的编码切换逻辑
   await changeEncoding(newEncoding, emit);
@@ -116,7 +127,6 @@ const handleContentChange = (newContent) => {
 };
 
 const handleSave = (content) => {
-  console.log("TextPreview 触发保存事件，交由父级组件处理实际保存逻辑");
   emit("save", {
     content,
     filename: currentFileData.value?.name,
@@ -127,7 +137,7 @@ const handleSave = (content) => {
 // 加载文本内容 - 使用统一逻辑
 const loadTextContent = async () => {
   if (!currentFileData.value) {
-    console.warn("没有可用的文件数据");
+    log.warn("没有可用的文件数据");
     return;
   }
 
@@ -141,21 +151,51 @@ const loadTextContent = async () => {
 // 初始化当前文件数据
 const initializeCurrentFile = async () => {
   if (!props.file) {
-    console.log("❌ 无法初始化当前文件：文件信息为空");
     return;
   }
 
-  console.log("📄 开始初始化当前文件:", props.file.name);
+  const fsPath = props.file.path || props.currentPath || "/";
 
-  // 使用传入的文本URL或文件的预览URL
-  const previewUrl = props.textUrl || props.file.preview_url;
+  // 为预览内容构造统一的同源内容 URL
+  let baseContentUrl = `/api/fs/content?path=${encodeURIComponent(fsPath)}`;
+
+  // 非管理员访问时，附加路径密码 token（如果存在）
+  if (!props.isAdmin) {
+    const token = pathPassword.getPathToken(fsPath);
+    if (token) {
+      baseContentUrl += `&path_token=${encodeURIComponent(token)}`;
+    }
+  }
+
+  // 文本/Markdown/代码预览需要通过 fetch 拉取内容：
+  // - 对同源或 proxy 链接可直接使用 textUrl
+  // - 对跨域 direct 链接禁用外链 fetch，强制走同源 /api/fs/content
+  const safeTextUrl = (() => {
+    if (!props.textUrl) return null;
+    try {
+      const resolved = new URL(props.textUrl, window.location.href);
+      if (resolved.origin === window.location.origin) {
+        return props.textUrl;
+      }
+      const linkType = (props.file?.linkType || "").toLowerCase();
+      if (linkType === "proxy") {
+        return props.textUrl;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const previewUrl = safeTextUrl || baseContentUrl;
 
   if (previewUrl) {
-    console.log("📄 使用文本URL:", previewUrl);
     currentFileData.value = {
       name: props.file.name || "unknown",
       filename: props.file.name || "unknown",
-      preview_url: previewUrl,
+      previewUrl: previewUrl,
+      contentUrl: baseContentUrl,
+      path: fsPath,
       contentType: props.file.contentType,
       size: props.file.size,
       modified: props.file.modified,
@@ -165,7 +205,7 @@ const initializeCurrentFile = async () => {
     // 加载文本内容
     await loadTextContent();
   } else {
-    console.error("❌ 没有可用的预览URL");
+    log.error("❌ 没有可用的文本内容 URL");
   }
 };
 
@@ -201,11 +241,6 @@ watch(
     currentEncoding.value = newEncoding;
   }
 );
-
-// 组件挂载时初始化
-onMounted(() => {
-  initializeCurrentFile();
-});
 
 // 暴露方法供父组件调用
 defineExpose({
@@ -252,23 +287,7 @@ defineExpose({
   min-height: 200px;
 }
 
-.loading-spinner {
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 2px solid transparent;
-  border-top: 2px solid currentColor;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 0.5rem;
-}
-
 .loading-text {
   font-size: 0.875rem;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

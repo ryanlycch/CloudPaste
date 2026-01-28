@@ -58,9 +58,7 @@
                 :class="darkMode ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'"
                 :title="t('admin.sidebar.collapse')"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                </svg>
+                <IconChevronLeft size="sm" aria-hidden="true" />
               </button>
             </transition>
 
@@ -76,9 +74,7 @@
               "
               :title="t('admin.sidebar.expand')"
             >
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-              </svg>
+              <IconChevronRight size="xs" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -104,20 +100,16 @@
                 ]"
                 :title="isCollapsed ? item.name : ''"
               >
-                <svg
-                  class="flex-shrink-0 h-6 w-6"
+                <component
+                  :is="getMenuIconComponent(item.icon)"
+                  size="lg"
+                  class="flex-shrink-0"
                   :class="[
                     isCollapsed ? 'mx-auto' : 'mr-3',
                     $route.name === item.routeName ? 'text-primary-500' : darkMode ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-400 group-hover:text-gray-500',
                   ]"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
                   aria-hidden="true"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath(item.icon)" />
-                </svg>
+                />
                 <transition
                   name="fade-slide"
                   enter-active-class="transition-all duration-300 delay-100"
@@ -145,41 +137,33 @@
                   ]"
                   :title="item.name"
                 >
-                  <svg
-                    class="h-6 w-6 mx-auto"
+                  <component
+                    :is="getMenuIconComponent(item.icon)"
+                    size="lg"
+                    class="mx-auto"
                     :class="darkMode ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-400 group-hover:text-gray-500'"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
                     aria-hidden="true"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath(item.icon)" />
-                  </svg>
+                  />
                 </button>
 
                 <!-- 展开状态：显示完整的组菜单 -->
                 <template v-else>
                   <!-- 主菜单项 -->
                   <button
-                    @click="toggleSystemSettings"
+                    @click="item.id === 'system-settings' ? toggleSystemSettings() : toggleTaskManagement()"
                     :class="[
                       darkMode ? 'text-gray-300 hover:bg-gray-700 hover:text-white' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
                       'w-full group flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md cursor-pointer',
                     ]"
                   >
                     <div class="flex items-center">
-                      <svg
-                        class="flex-shrink-0 h-6 w-6"
+                      <component
+                        :is="getMenuIconComponent(item.icon)"
+                        size="lg"
+                        class="flex-shrink-0"
                         :class="[isCollapsed ? 'mx-auto' : 'mr-3', darkMode ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-400 group-hover:text-gray-500']"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
                         aria-hidden="true"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath(item.icon)" />
-                      </svg>
+                      />
                       <transition
                         name="fade-slide"
                         enter-active-class="transition-all duration-300 delay-100"
@@ -204,22 +188,17 @@
                       leave-from-class="opacity-100 transform translate-x-0"
                       leave-to-class="opacity-0 transform translate-x-2"
                     >
-                      <svg
+                      <IconChevronDown
                         v-if="!isCollapsed"
-                        class="h-5 w-5 transition-transform duration-200"
-                        :class="[isSystemSettingsExpanded ? 'transform rotate-180' : '', darkMode ? 'text-gray-400' : 'text-gray-500']"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath('chevron-down')" />
-                      </svg>
+                        class="transition-transform duration-200"
+                        :class="[(item.id === 'system-settings' ? isSystemSettingsExpanded : isTaskManagementExpanded) ? 'transform rotate-180' : '', darkMode ? 'text-gray-400' : 'text-gray-500']"
+                        aria-hidden="true"
+                      />
                     </transition>
                   </button>
 
                   <!-- 子菜单项 -->
-                  <div v-if="isSystemSettingsExpanded" class="ml-6 space-y-1">
+                  <div v-if="item.id === 'system-settings' ? isSystemSettingsExpanded : isTaskManagementExpanded" class="ml-6 space-y-1">
                     <router-link
                       v-for="child in item.children"
                       :key="child.id"
@@ -235,20 +214,15 @@
                         'group flex items-center px-3 py-2 text-sm font-medium rounded-md',
                       ]"
                     >
-                      <svg
-                        class="flex-shrink-0 h-5 w-5"
+                      <component
+                        :is="getMenuIconComponent(child.icon)"
+                        class="flex-shrink-0"
                         :class="[
                           isCollapsed ? 'mx-auto' : 'mr-3',
                           $route.name === child.routeName ? 'text-primary-500' : darkMode ? 'text-gray-500 group-hover:text-gray-400' : 'text-gray-400 group-hover:text-gray-500',
                         ]"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
                         aria-hidden="true"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath(child.icon)" />
-                      </svg>
+                      />
                       <transition
                         name="fade-slide"
                         enter-active-class="transition-all duration-300 delay-100"
@@ -279,17 +253,12 @@
                 ]"
                 :title="isCollapsed ? logoutText : ''"
               >
-                <svg
-                  class="flex-shrink-0 h-6 w-6"
+                <IconLogout
+                  size="lg"
+                  class="flex-shrink-0"
                   :class="[isCollapsed ? 'mx-auto' : 'mr-3', 'text-gray-400']"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
                   aria-hidden="true"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath('logout')" />
-                </svg>
+                />
                 <transition
                   name="fade-slide"
                   enter-active-class="transition-all duration-300 delay-100"
@@ -314,17 +283,10 @@
                   :class="[
                     darkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-500',
                     'inline-flex items-center justify-center p-2 rounded-md transition-colors duration-200',
-                  ]"
-                  title="Document"
-                >
-                  <svg class="h-7 w-7" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                    />
-                  </svg>
+                ]"
+                title="Document"
+              >
+                  <IconBookOpen class="h-7 w-7" aria-hidden="true" />
                 </a>
               </div>
             </div>
@@ -367,17 +329,7 @@
               class="ml-1 flex items-center justify-center h-10 w-10 rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
             >
               <span class="sr-only">{{ t("admin.sidebar.closeMenu") }}</span>
-              <svg
-                class="h-6 w-6"
-                :class="darkMode ? 'text-white' : 'text-gray-600'"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                aria-hidden="true"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <IconClose size="lg" :class="darkMode ? 'text-white' : 'text-gray-600'" aria-hidden="true" />
             </button>
           </div>
 
@@ -403,17 +355,13 @@
                   ]"
                   @click="$emit('close-mobile-sidebar')"
                 >
-                  <svg
-                    class="mr-3 flex-shrink-0 h-6 w-6"
+                  <component
+                    :is="getMenuIconComponent(item.icon)"
+                    size="lg"
+                    class="mr-3 flex-shrink-0"
                     :class="$route.name === item.routeName ? 'text-primary-500' : darkMode ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-400 group-hover:text-gray-500'"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
                     aria-hidden="true"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath(item.icon)" />
-                  </svg>
+                  />
                   {{ item.name }}
                 </router-link>
 
@@ -421,41 +369,32 @@
                 <div v-else-if="item.type === 'group'" :key="`mobile-group-${item.id}`" class="space-y-1">
                   <!-- 主菜单项 -->
                   <a
-                    @click="toggleSystemSettings"
+                    @click="item.id === 'system-settings' ? toggleSystemSettings() : toggleTaskManagement()"
                     :class="[
                       darkMode ? 'text-gray-300 hover:bg-gray-700 hover:text-white' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
                       'group flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-md cursor-pointer',
                     ]"
                   >
                     <div class="flex items-center">
-                      <svg
-                        class="mr-3 flex-shrink-0 h-6 w-6"
+                      <component
+                        :is="getMenuIconComponent(item.icon)"
+                        size="lg"
+                        class="mr-3 flex-shrink-0"
                         :class="darkMode ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-400 group-hover:text-gray-500'"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
                         aria-hidden="true"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath(item.icon)" />
-                      </svg>
+                      />
                       {{ item.name }}
                     </div>
                     <!-- 展开/收起箭头 -->
-                    <svg
-                      class="h-5 w-5 transition-transform duration-200"
-                      :class="[isSystemSettingsExpanded ? 'transform rotate-180' : '', darkMode ? 'text-gray-400' : 'text-gray-500']"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath('chevron-down')" />
-                    </svg>
+                    <IconChevronDown
+                      class="transition-transform duration-200"
+                      :class="[(item.id === 'system-settings' ? isSystemSettingsExpanded : isTaskManagementExpanded) ? 'transform rotate-180' : '', darkMode ? 'text-gray-400' : 'text-gray-500']"
+                      aria-hidden="true"
+                    />
                   </a>
 
                   <!-- 子菜单项 -->
-                  <div v-if="isSystemSettingsExpanded" class="ml-6 space-y-1">
+                  <div v-if="item.id === 'system-settings' ? isSystemSettingsExpanded : isTaskManagementExpanded" class="ml-6 space-y-1">
                     <router-link
                       v-for="child in item.children"
                       :key="child.id"
@@ -472,19 +411,14 @@
                       ]"
                       @click="$emit('close-mobile-sidebar')"
                     >
-                      <svg
-                        class="mr-3 flex-shrink-0 h-5 w-5"
+                      <component
+                        :is="getMenuIconComponent(child.icon)"
+                        class="mr-3 flex-shrink-0"
                         :class="
                           $route.name === child.routeName ? 'text-primary-500' : darkMode ? 'text-gray-500 group-hover:text-gray-400' : 'text-gray-400 group-hover:text-gray-500'
                         "
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
                         aria-hidden="true"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath(child.icon)" />
-                      </svg>
+                      />
                       {{ child.name }}
                     </router-link>
                   </div>
@@ -500,9 +434,7 @@
                     'group flex items-center px-3 py-2.5 text-sm font-medium rounded-md cursor-pointer',
                   ]"
                 >
-                  <svg class="mr-3 flex-shrink-0 h-6 w-6 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getIconPath('logout')" />
-                  </svg>
+                  <IconLogout size="lg" class="mr-3 flex-shrink-0 text-gray-400" aria-hidden="true" />
                   {{ logoutText }}
                 </a>
 
@@ -519,14 +451,7 @@
                     title="Document"
                     @click="$emit('close-mobile-sidebar')"
                   >
-                    <svg class="h-7 w-7" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                      />
-                    </svg>
+                    <IconBookOpen class="h-7 w-7" aria-hidden="true" />
                   </a>
                 </div>
               </div>
@@ -541,8 +466,10 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useLocalStorage } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
 import { useSiteConfigStore } from "@/stores/siteConfigStore.js";
+import { IconBellAlert, IconBookOpen, IconChartBar, IconChevronDown, IconChevronLeft, IconChevronRight, IconCircleStack, IconCloud, IconClose, IconDocumentText, IconEye, IconFolder, IconGlobeAlt, IconHome, IconInformationCircle, IconKey, IconLink, IconLogout, IconMenu, IconSearch, IconServerStack, IconSettings, IconTaskList, IconUser, IconList } from "@/components/icons";
 
 // 使用i18n和站点配置Store
 const { t } = useI18n();
@@ -566,20 +493,16 @@ const props = defineProps({
 const emit = defineEmits(["close-mobile-sidebar", "logout", "sidebar-toggle"]);
 
 // 侧边栏收缩状态
-const isCollapsed = ref(false);
+const isCollapsed = useLocalStorage("admin-sidebar-collapsed", false);
 
-// 恢复保存的收缩状态
+// 初始化时通知父组件
 onMounted(() => {
-  const saved = localStorage.getItem("admin-sidebar-collapsed");
-  if (saved !== null) {
-    isCollapsed.value = JSON.parse(saved);
-    // 初始化时也要通知父组件
-    emit("sidebar-toggle", { collapsed: isCollapsed.value });
-  }
+  emit("sidebar-toggle", { collapsed: isCollapsed.value });
 });
 
-// 系统设置菜单的展开状态
+// 菜单组的展开状态
 const isSystemSettingsExpanded = ref(false);
+const isTaskManagementExpanded = ref(false);
 
 // 站点图标相关计算属性
 const siteFaviconUrl = computed(() => siteConfigStore.siteFaviconUrl);
@@ -594,13 +517,36 @@ const handleImageError = (event) => {
   event.target.src = "/cloudpaste.svg";
 };
 
-// 提取localStorage操作
-const saveCollapseState = (collapsed) => {
-  localStorage.setItem("admin-sidebar-collapsed", JSON.stringify(collapsed));
-};
-
 // 常量
 const DOC_URL = "https://doc.cloudpaste.qzz.io/";
+
+// 统一侧边栏图标：从图标名映射到统一出口 @/components/icons 的组件
+const menuIconMap = {
+  'chart-bar': IconChartBar,
+  'document-text': IconDocumentText,
+  folder: IconFolder,
+  cloud: IconCloud,
+  server: IconServerStack,
+  'information-circle': IconInformationCircle,
+  'clipboard-list': IconTaskList,
+  'bell-alert': IconBellAlert,
+  'list-bullet': IconList,
+  key: IconKey,
+  user: IconUser,
+  'circle-stack': IconCircleStack,
+  cog: IconSettings,
+  globe: IconGlobeAlt,
+  eye: IconEye,
+  'cloud-webdav': IconLink,
+  home: IconHome,
+  logout: IconLogout,
+  'chevron-down': IconChevronDown,
+  search: IconSearch,
+};
+
+const getMenuIconComponent = (iconName) => {
+  return menuIconMap[iconName] || IconMenu;
+};
 
 // 根据登录类型和权限计算可见的菜单项
 const visibleMenuItems = computed(() => {
@@ -613,6 +559,17 @@ const visibleMenuItems = computed(() => {
       { id: "storage", name: t("admin.sidebar.storageConfig"), icon: "cloud", type: "item", routeName: "AdminStorage" },
       { id: "mount-management", name: t("admin.sidebar.mountManagement"), icon: "server", type: "item", routeName: "AdminMountManagement" },
       { id: "fs-meta-management", name: t("admin.sidebar.fsMetaManagement"), icon: "information-circle", type: "item", routeName: "AdminFsMetaManagement" },
+      {
+        id: "task-management",
+        name: t("admin.sidebar.taskManagement"),
+        icon: "clipboard-list",
+        type: "group",
+        children: [
+          { id: "scheduled-jobs", name: t("admin.sidebar.scheduledJobs"), icon: "bell-alert", type: "item", routeName: "AdminScheduledJobs" },
+          { id: "tasks", name: t("admin.sidebar.tasks"), icon: "list-bullet", type: "item", routeName: "AdminTasks" },
+        ],
+      },
+      { id: "fs-index-management", name: t("admin.sidebar.fsIndexManagement"), icon: "search", type: "item", routeName: "AdminFsIndexManagement" },
       { id: "key-management", name: t("admin.sidebar.keyManagement"), icon: "key", type: "item", routeName: "AdminKeyManagement" },
       { id: "account-management", name: t("admin.sidebar.accountManagement"), icon: "user", type: "item", routeName: "AdminAccountManagement" },
       { id: "backup", name: t("admin.sidebar.backup"), icon: "circle-stack", type: "item", routeName: "AdminBackup" },
@@ -646,79 +603,44 @@ const visibleMenuItems = computed(() => {
     items.push({ id: "mount-management", name: t("admin.sidebar.mountManagement"), icon: "server", type: "item", routeName: "AdminMountManagement" });
   }
 
+  // 任务管理：有挂载权限即可访问，具体任务根据权限类型在列表内过滤
+  if (props.permissions.mount) {
+    items.push({ id: "tasks", name: t("admin.sidebar.tasks"), icon: "list-bullet", type: "item", routeName: "AdminTasks" });
+  }
+
   // 所有API密钥用户都可以访问账户管理（用于查看信息和登出）
   items.push({ id: "account-management", name: t("admin.sidebar.accountManagement"), icon: "user", type: "item", routeName: "AdminAccountManagement" });
 
   return items;
 });
 
-// 切换系统设置菜单的展开状态
+// 切换菜单组的展开状态
 const toggleSystemSettings = () => {
   isSystemSettingsExpanded.value = !isSystemSettingsExpanded.value;
+};
+
+const toggleTaskManagement = () => {
+  isTaskManagementExpanded.value = !isTaskManagementExpanded.value;
 };
 
 // 收缩/展开切换函数
 const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value;
-  saveCollapseState(isCollapsed.value);
   emit("sidebar-toggle", { collapsed: isCollapsed.value });
 };
 
 // 处理收缩状态下的组菜单项点击 - 展开侧边栏并展开子菜单
 const handleGroupItemClick = () => {
   isCollapsed.value = false;
-  saveCollapseState(false);
   emit("sidebar-toggle", { collapsed: false });
+  // 展开所有菜单组
   isSystemSettingsExpanded.value = true;
+  isTaskManagementExpanded.value = true;
 };
 
 // 退出登录
 const handleLogout = () => {
   emit("logout");
-};
-
-// 根据图标名称返回SVG路径数据
-const getIconPath = (iconName) => {
-  switch (iconName) {
-    case "chart-bar":
-      return "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z";
-    case "document-text":
-      return "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z";
-    case "document-duplicate":
-      return "M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2";
-    case "information-circle":
-      return "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
-    case "folder":
-      return "M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z";
-    case "cloud":
-      return "M8 16a5 5 0 01-.916-9.916A5.002 5.002 0 0113 6c2.761 0 5 2.239 5 5 0 .324-.024.64-.075.947 1.705.552 2.668 2.176 2.668 3.833 0 1.598-1.425 3.22-3 3.22h-2.053V14.53c0-.282-.112-.55-.308-.753a1 1 0 00-1.412-.002l-2.332 2.332c-.39.39-.39 1.024 0 1.414l2.331 2.331c.392.391 1.025.39 1.414-.001a1.06 1.06 0 00.307-.752V17h2.053a5.235 5.235 0 003.626-8.876A7.002 7.002 0 0013 4a7.002 7.002 0 00-6.929 5.868A6.998 6.998 0 008 16z";
-    case "cloud-webdav":
-      return "M3 17a4 4 0 01.899-7.899 5.002 5.002 0 019.802-1.902A4 4 0 0117 17H7a4 4 0 01-4-4z";
-    case "key":
-      return "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z";
-    case "cog":
-      return "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z";
-    case "logout":
-      return "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1";
-    case "server":
-      return "M5 12H3v8h18v-8H5zm0 0a2 2 0 100-4h14a2 2 0 100 4M5 8a2 2 0 100-4h14a2 2 0 100 4";
-    case "chevron-down":
-      return "M19 9l-7 7-7-7";
-    case "globe":
-      return "M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9";
-    case "user":
-      return "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z";
-    case "eye":
-      return "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z";
-    case "home":
-      return "M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z";
-    case "archive":
-      return "M5 8a2 2 0 012-2h6a2 2 0 012 2v1a2 2 0 002 2h2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2h2a2 2 0 002-2V8z";
-    case "circle-stack":
-      return "M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375";
-    default:
-      return "";
-  }
 };
 </script>
 

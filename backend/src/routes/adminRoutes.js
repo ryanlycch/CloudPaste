@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { login, logout, changePassword, testAdminToken } from "../services/adminService.js";
-import { ApiStatus, UserType } from "../constants/index.js";
+import { UserType } from "../constants/index.js";
 import { jsonOk } from "../utils/common.js";
 import { directoryCacheManager, urlCacheManager, searchCacheManager } from "../cache/index.js";
 import { invalidateFsCache, invalidateAllCaches } from "../cache/invalidation.js";
@@ -29,7 +29,7 @@ adminRoutes.post("/api/admin/login", async (c) => {
   const db = c.env.DB;
   const repositoryFactory = c.get("repos");
   const { username, password } = await c.req.json();
-  const loginResult = await login(db, username, password, repositoryFactory);
+  const loginResult = await login(db, username, password, repositoryFactory, c.env);
 
   return jsonOk(c, loginResult, "登录成功");
 });

@@ -8,7 +8,7 @@ export const DbTables = {
   ADMIN_TOKENS: "admin_tokens", // 管理员令牌表
   PASTES: "pastes", // 文本表
   API_KEYS: "api_keys", // API密钥表
-  STORAGE_CONFIGS: "storage_configs", // 通用“存储配置表”
+  STORAGE_CONFIGS: "storage_configs", // 通用"存储配置表"
   PRINCIPAL_STORAGE_ACL: "principal_storage_acl", // 主体 -> 存储配置 ACL 表
   FILES: "files", // 文件表
   FILE_PASSWORDS: "file_passwords", // 文件明文密码表
@@ -16,6 +16,18 @@ export const DbTables = {
   PASTE_PASSWORDS: "paste_passwords", // 文本密码表
   STORAGE_MOUNTS: "storage_mounts", // 存储挂载表
   FS_META: "fs_meta", // 目录 Meta 配置表
+  FS_SEARCH_INDEX_ENTRIES: "fs_search_index_entries", // FS 搜索索引（条目表，派生数据）
+  FS_SEARCH_INDEX_STATE: "fs_search_index_state", // FS 搜索索引（状态表，派生数据）
+  FS_SEARCH_INDEX_FTS: "fs_search_index_fts", // FS 搜索索引（FTS5 虚表，派生数据）
+  FS_SEARCH_INDEX_DIRTY: "fs_search_index_dirty", // FS 搜索索引（dirty 队列表，派生数据）
+  METRICS_CACHE: "metrics_cache", // 通用指标缓存表（快照/用量/配额等派生数据）
+  TASKS: "tasks", // 任务编排表
+  SCHEMA_MIGRATIONS: "schema_migrations", // 迁移历史表（用于记录 schema 版本）
+  SCHEDULED_JOBS: "scheduled_jobs", // 后台调度作业表
+  SCHEDULED_JOB_RUNS: "scheduled_job_runs", // 后台调度作业运行日志表
+  UPLOAD_SESSIONS: "upload_sessions", // 通用上传会话表（前端分片/断点续传）
+  UPLOAD_PARTS: "upload_parts", // 上传分片明细表（临时账本，一片一行）
+  VFS_NODES: "vfs_nodes", // 虚拟目录树索引表（长期目录树/条目）
 };
 
 // 默认的最大上传大小（MB）
@@ -35,7 +47,7 @@ export const ApiStatus = {
   INTERNAL_ERROR: 500,
 };
 
-// alist风格的文件类型常量
+//文件类型常量
 export const FILE_TYPES = {
   UNKNOWN: 0, // 未知文件
   FOLDER: 1, // 文件夹

@@ -1,9 +1,12 @@
 <script setup>
 import { ref, reactive, onMounted } from "vue";
+import { useLocalStorage } from "@vueuse/core";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { ApiStatus } from "@/api/ApiStatus";
 import { useAuthStore } from "@/stores/authStore.js";
+import { IconKey, IconUser, IconUsers } from "@/components/icons";
+import { createLogger } from "@/utils/logger.js";
 
 const props = defineProps({
   darkMode: {
@@ -14,6 +17,7 @@ const props = defineProps({
 
 const router = useRouter();
 const { t } = useI18n();
+const log = createLogger("AdminLoginView");
 const authStore = useAuthStore();
 
 const loading = ref(false);
@@ -37,12 +41,12 @@ const toggleLoginMode = () => {
 };
 
 const LOGIN_PREF_KEY = "cp_admin_login_pref";
+const storedLoginPref = useLocalStorage(LOGIN_PREF_KEY, null);
 
 const loadRemembered = () => {
   try {
-    const raw = localStorage.getItem(LOGIN_PREF_KEY);
-    if (!raw) return;
-    const data = JSON.parse(raw);
+    const data = storedLoginPref.value;
+    if (!data) return;
 
     if (data.lastMode === "admin") {
       isApiKeyMode.value = false;
@@ -71,7 +75,7 @@ const saveRemembered = (mode) => {
     apiKey: mode === "apikey" && rememberMe.value ? apiKeyForm.apiKey : "",
   };
   try {
-    localStorage.setItem(LOGIN_PREF_KEY, JSON.stringify(payload));
+    storedLoginPref.value = payload;
   } catch {
     // ignore
   }
@@ -103,7 +107,7 @@ const handleLogin = async () => {
       router.push("/admin");
     }
   } catch (err) {
-    console.error("管理员登录失败:", err);
+    log.error("管理员登录失败:", err);
     if (err.status === ApiStatus.UNAUTHORIZED || err.response?.status === ApiStatus.UNAUTHORIZED || err.code === ApiStatus.UNAUTHORIZED) {
       error.value = t("admin.login.errors.invalidCredentials") || "用户名或密码错误";
     } else if (err.message && err.message.includes("认证失败")) {
@@ -138,7 +142,7 @@ const handleApiKeyLogin = async () => {
       router.push("/admin");
     }
   } catch (err) {
-    console.error("API密钥验证失败:", err);
+    log.error("API密钥验证失败:", err);
     // 优先使用HTTP状态码判断错误类型，更可靠
     if (err.status === ApiStatus.UNAUTHORIZED || err.response?.status === ApiStatus.UNAUTHORIZED || err.code === ApiStatus.UNAUTHORIZED) {
       // 401 Unauthorized - API密钥无效
@@ -172,7 +176,7 @@ const handleGuestLogin = async () => {
       router.push({ name: "MountExplorer" });
     }
   } catch (err) {
-    console.error("游客登录失败:", err);
+    log.error("游客登录失败:", err);
     error.value = err.message || t("admin.login.errors.guestLoginFailed", "游客登录失败");
   } finally {
     loading.value = false;
@@ -312,9 +316,7 @@ onMounted(async () => {
                   : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
               ]"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-              </svg>
+              <IconKey aria-hidden="true" />
               {{ $t("admin.login.useApiKey") }}
             </button>
 
@@ -329,9 +331,7 @@ onMounted(async () => {
                   : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
               ]"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
+              <IconUser aria-hidden="true" />
               {{ $t("admin.login.useAdminAccount") }}
             </button>
 
@@ -348,9 +348,7 @@ onMounted(async () => {
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               ]"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
+              <IconUsers aria-hidden="true" />
               {{ $t("admin.login.useGuest", "以游客身份访问") }}
             </button>
           </div>

@@ -12,9 +12,8 @@ import {
   deleteStorageConfig,
   setDefaultStorageConfig,
   testStorageConnection,
-  getStorageConfigsWithUsage,
 } from "../services/storageConfigService.js";
-import { ApiStatus, UserType } from "../constants/index.js";
+import { UserType } from "../constants/index.js";
 import { getPagination, jsonOk, jsonCreated } from "../utils/common.js";
 import { getEncryptionSecret } from "../utils/environmentUtils.js";
 import { usePolicy } from "../security/policies/policies.js";
@@ -23,7 +22,7 @@ import { useRepositories } from "../utils/repositories.js";
 import { NotFoundError } from "../http/errors.js";
 
 const storageConfigRoutes = new Hono();
-const requireRead = usePolicy("s3.config.read");
+const requireRead = usePolicy("storage.config.read");
 const requireAdmin = usePolicy("admin.all");
 
 // 获取存储配置列表（管理员或公开）
@@ -145,7 +144,8 @@ storageConfigRoutes.put("/api/storage/:id", requireAdmin, async (c) => {
   const body = await c.req.json();
   await updateStorageConfig(db, id, body, adminId, encryptionSecret, repositoryFactory);
 
-  return jsonOk(c, undefined, "存储配置已更新");
+  const updated = await getStorageConfigByIdForAdmin(db, id, adminId, repositoryFactory);
+  return jsonOk(c, updated, "存储配置已更新");
 });
 
 // 删除存储配置（管理员）
@@ -177,8 +177,11 @@ storageConfigRoutes.post("/api/storage/:id/test", requireAdmin, async (c) => {
   const encryptionSecret = getEncryptionSecret(c);
   const requestOrigin = c.req.header("origin");
   const repositoryFactory = useRepositories(c);
-  const testResult = await testStorageConnection(db, id, adminId, encryptionSecret, requestOrigin, repositoryFactory);
-  return jsonOk(c, { success: testResult.success, result: testResult.result }, testResult.message);
+  const testData = await testStorageConnection(db, id, adminId, encryptionSecret, requestOrigin, repositoryFactory);
+
+  // 外层 success 只表示“请求是否被处理成功”
+  // 测试通过/失败由 data.success 表示
+  return jsonOk(c, testData, "OK");
 });
 
 export default storageConfigRoutes;

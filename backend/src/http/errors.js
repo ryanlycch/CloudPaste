@@ -14,6 +14,35 @@ const SENSITIVE_KEYS = [
   "password",
 ];
 
+const MAX_CLIENT_DEBUG_MESSAGE_LENGTH = 220;
+
+// 将错误信息做最小必要的脱敏（给前端展示用）
+export const sanitizeErrorMessageForClient = (message) => {
+  let text = String(message ?? "").trim();
+  if (!text) return null;
+
+  // 统一为单行
+  text = text.replace(/\s+/g, " ").trim();
+
+  // 常见 query token
+  text = text.replace(/access_token=([^&\s]+)/gi, "access_token=***");
+  text = text.replace(/refresh_token=([^&\s]+)/gi, "refresh_token=***");
+  text = text.replace(/token=([^&\s]+)/gi, "token=***");
+  text = text.replace(/signature=([^&\s]+)/gi, "signature=***");
+
+  // Authorization / ApiKey
+  text = text.replace(/\b(Bearer|ApiKey)\s+([A-Za-z0-9._-]+)\b/gi, "$1 ***");
+
+  // AWS / S3 常见字段（轻量遮盖）
+  text = text.replace(/\bAKIA[0-9A-Z]{16}\b/g, "AKIA****************");
+
+  if (text.length > MAX_CLIENT_DEBUG_MESSAGE_LENGTH) {
+    text = `${text.slice(0, MAX_CLIENT_DEBUG_MESSAGE_LENGTH - 1)}…`;
+  }
+
+  return text;
+};
+
 //  AppError 用于处理应用程序错误
 export class AppError extends Error {
   /**
@@ -112,6 +141,27 @@ export class S3DriverError extends DriverError {
       : { details: optionsOrDetails, code: "DRIVER_ERROR.S3" };
     super(message, opts);
     this.name = "S3DriverError";
+  }
+}
+
+// 驱动契约错误：用于标记存储驱动在类型/能力/方法实现上的契约不一致
+export class DriverContractError extends DriverError {
+  /**
+   * @param {string} message
+   * @param {object|any} optionsOrDetails - 同 DriverError，可覆盖 status/code/expose/details
+   */
+  constructor(message = "存储驱动契约不符合规范", optionsOrDetails = null) {
+    const base = {
+      status: ApiStatus.INTERNAL_ERROR,
+      code: "DRIVER_ERROR.INVALID_CONTRACT",
+      expose: false,
+    };
+    const opts =
+      optionsOrDetails && typeof optionsOrDetails === "object" && ("status" in optionsOrDetails || "code" in optionsOrDetails || "expose" in optionsOrDetails || "details" in optionsOrDetails)
+        ? { ...base, ...optionsOrDetails }
+        : { ...base, details: optionsOrDetails };
+    super(message, opts);
+    this.name = "DriverContractError";
   }
 }
 

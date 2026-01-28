@@ -25,11 +25,14 @@ export function generateRandomString(length = 8) {
  * @returns {object} 标准错误响应对象
  */
 export function createErrorResponse(_statusCode, message, code) {
-  return {
+  const base = {
     success: false,
     code,
     message,
   };
+  const extra = arguments.length >= 4 ? arguments[3] : null;
+  if (!extra || typeof extra !== "object") return base;
+  return { ...base, ...extra };
 }
 
 export function createSuccessResponse(data, message = "OK", code = "OK") {
@@ -277,17 +280,9 @@ async function handleFileOverride(existingFile, overrideContext) {
             : await storageConfigRepository.findById(existingFile.storage_config_id))
         : null;
       if (storageConfig) {
-        const { StorageFactory } = await import("../storage/factory/StorageFactory.js");
-        if (!storageConfig.storage_type) {
-          throw new ValidationError("存储配置缺少 storage_type");
-        }
-        const driver = await StorageFactory.createDriver(storageConfig.storage_type, storageConfig, encryptionSecret);
-        await driver.initialize?.();
-        if (typeof driver.deleteObjectByStoragePath === "function") {
-          await driver.deleteObjectByStoragePath(existingFile.storage_path, { db });
-        } else if (typeof driver.batchRemoveItems === "function") {
-          await driver.batchRemoveItems([existingFile.storage_path], { subPath: existingFile.storage_path, db });
-        }
+        const { ObjectStore } = await import("../storage/object/ObjectStore.js");
+        const objectStore = new ObjectStore(db, encryptionSecret, repositoryFactory);
+        await objectStore.deleteByStoragePath(existingFile.storage_config_id, existingFile.storage_path, { db });
       }
     } catch (error) {
       console.warn("删除旧存储对象失败", error);

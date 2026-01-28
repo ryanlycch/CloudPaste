@@ -6,57 +6,12 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { api } from "@/api";
+import { createLogger } from "@/utils/logger.js";
+
+const log = createLogger("StorageConfigsStore");
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 分钟缓存
 const FETCH_LIMIT = 200; // 通常足够覆盖所有配置
-
-// 存储类型 schema，可后续扩展字段渲染/校验
-const STORAGE_TYPE_SCHEMA = {
-  S3: {
-    type: "S3",
-    label: "对象存储 (S3 兼容)",
-    description: "支持 Cloudflare R2、B2、AWS S3 等对象存储，具备直传与预签名能力",
-    capabilities: {
-      multipart: true,
-      presigned: true,
-      requiresProxy: false,
-      preview: "signed-url",
-    },
-  },
-  WEBDAV: {
-    type: "WEBDAV",
-    label: "WebDAV",
-    description: "通过 WebDAV 网关读写文件，暂不支持分片直传",
-    capabilities: {
-      multipart: false,
-      presigned: false,
-      requiresProxy: true,
-      preview: "proxy",
-    },
-  },
-  LOCAL: {
-    type: "LOCAL",
-    label: "本地存储",
-    description: "直接挂载服务器本地磁盘，通常仅用于自托管",
-    capabilities: {
-      multipart: false,
-      presigned: false,
-      requiresProxy: true,
-      preview: "proxy",
-    },
-  },
-  UNKNOWN: {
-    type: "UNKNOWN",
-    label: "未指定类型",
-    description: "缺少 storage_type 字段，仅提供基础信息",
-    capabilities: {
-      multipart: false,
-      presigned: false,
-      requiresProxy: true,
-      preview: "proxy",
-    },
-  },
-};
 
 export const useStorageConfigsStore = defineStore("storageConfigs", () => {
   const configs = ref([]);
@@ -66,9 +21,20 @@ export const useStorageConfigsStore = defineStore("storageConfigs", () => {
 
   let inflightPromise = null;
 
+  // 存储类型元数据：以 /api/storage-types 为唯一真相
+  const storageTypesMeta = ref([]);
+  const storageTypesLastLoadedAt = ref(0);
+  const storageTypesLoading = ref(false);
+  let inflightStorageTypesPromise = null;
+
   const hasFreshCache = computed(() => {
     if (!configs.value.length || !lastLoadedAt.value) return false;
     return Date.now() - lastLoadedAt.value < CACHE_TTL;
+  });
+
+  const hasFreshStorageTypesCache = computed(() => {
+    if (!storageTypesMeta.value.length || !storageTypesLastLoadedAt.value) return false;
+    return Date.now() - storageTypesLastLoadedAt.value < CACHE_TTL;
   });
 
   const sortedConfigs = computed(() => {
@@ -129,7 +95,7 @@ export const useStorageConfigsStore = defineStore("storageConfigs", () => {
     return [];
   };
 
-  const setConfigs = (list = []) => {
+  const replaceConfigs = (list = []) => {
     configs.value = Array.isArray(list) ? list : [];
     lastLoadedAt.value = Date.now();
   };
@@ -155,11 +121,11 @@ export const useStorageConfigsStore = defineStore("storageConfigs", () => {
       .getStorageConfigs({ limit })
       .then((response) => {
         const normalized = normalizeResponse(response);
-        setConfigs(normalized);
+        replaceConfigs(normalized);
         return configs.value;
       })
       .catch((err) => {
-        console.error("加载存储配置失败", err);
+        log.error("加载存储配置失败", err);
         error.value = err;
         throw err;
       })
@@ -171,9 +137,57 @@ export const useStorageConfigsStore = defineStore("storageConfigs", () => {
     return inflightPromise;
   };
 
+  const normalizeStorageTypesResponse = (payload) => {
+    if (!payload) return [];
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload.data)) return payload.data;
+    if (Array.isArray(payload.result)) return payload.result;
+    return [];
+  };
+
+  const loadStorageTypes = async ({ force = false } = {}) => {
+    if (!force && hasFreshStorageTypesCache.value) {
+      return storageTypesMeta.value;
+    }
+
+    if (inflightStorageTypesPromise) {
+      return inflightStorageTypesPromise;
+    }
+
+    storageTypesLoading.value = true;
+    inflightStorageTypesPromise = api.mount
+      .getStorageTypes()
+      .then((resp) => {
+        storageTypesMeta.value = normalizeStorageTypesResponse(resp);
+        storageTypesLastLoadedAt.value = Date.now();
+        return storageTypesMeta.value;
+      })
+      .catch((err) => {
+        log.error("加载存储类型元数据失败", err);
+        storageTypesMeta.value = [];
+        throw err;
+      })
+      .finally(() => {
+        storageTypesLoading.value = false;
+        inflightStorageTypesPromise = null;
+      });
+
+    return inflightStorageTypesPromise;
+  };
+
+  const ensureStorageTypesLoaded = () => {
+    if (storageTypesLoading.value || hasFreshStorageTypesCache.value) return;
+    void loadStorageTypes().catch(() => null);
+  };
+
   const refreshConfigs = async () => {
     lastLoadedAt.value = 0;
     return loadConfigs({ force: true });
+  };
+
+  const refreshStorageTypes = async () => {
+    storageTypesLastLoadedAt.value = 0;
+    return await loadStorageTypes({ force: true });
   };
 
   const invalidateCache = () => {
@@ -204,19 +218,26 @@ export const useStorageConfigsStore = defineStore("storageConfigs", () => {
   };
 
   const getStorageTypeMeta = (type) => {
-    if (!type) return STORAGE_TYPE_SCHEMA.UNKNOWN;
-    return STORAGE_TYPE_SCHEMA[type] || STORAGE_TYPE_SCHEMA.UNKNOWN;
+    ensureStorageTypesLoaded();
+    const normalized = typeof type === "string" ? type.trim() : "";
+    if (!normalized) return null;
+    return storageTypesMeta.value.find((m) => m?.type === normalized) || null;
   };
 
-  const getStorageTypeLabel = (type) => getStorageTypeMeta(type).label;
+  const getStorageTypeLabel = (type) => {
+    const normalized = typeof type === "string" ? type.trim() : "";
+    if (!normalized) return "未指定类型";
+    const meta = getStorageTypeMeta(normalized);
+    return meta?.displayName || meta?.type || normalized;
+  };
 
   const formatProviderLabel = (config) => {
     if (!config) return "";
-    const typeMeta = getStorageTypeMeta(config.storage_type);
+    const typeLabel = getStorageTypeLabel(config.storage_type);
     if (config.provider_type) {
-      return `${config.provider_type} · ${typeMeta.label}`;
+      return `${config.provider_type} · ${typeLabel}`;
     }
-    return typeMeta.label;
+    return typeLabel;
   };
 
   return {
@@ -230,14 +251,16 @@ export const useStorageConfigsStore = defineStore("storageConfigs", () => {
     hasFreshCache,
     availableStorageTypes,
     defaultConfig,
-
-    // schema
-    storageTypeSchema: STORAGE_TYPE_SCHEMA,
+    storageTypesMeta,
+    storageTypesLoading,
 
     // 业务方法
     loadConfigs,
     refreshConfigs,
+    loadStorageTypes,
+    refreshStorageTypes,
     invalidateCache,
+    replaceConfigs,
     getConfigById,
     getDefaultConfigId,
     upsertConfig,

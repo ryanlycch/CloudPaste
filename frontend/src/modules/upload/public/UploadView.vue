@@ -17,9 +17,11 @@
     <div class="main-content" v-if="hasPermission">
       <!-- 文件上传区域 -->
       <div class="card mb-6 p-4 sm:p-6">
-        <FileUploader
+        <UppyShareUploader
           :dark-mode="darkMode"
+          :loading="loadingFiles"
           :is-admin="isAdmin"
+          :storage-configs="storageConfigsStore.sortedConfigs"
           @upload-success="handleUploadSuccess"
           @upload-error="handleUploadError"
           @share-results="handleShareResults"
@@ -92,7 +94,7 @@
 <script setup>
 import { ref, onMounted, computed } from "vue";
 import { storeToRefs } from "pinia";
-import FileUploader from "@/modules/upload/public/components/FileUploader.vue";
+import UppyShareUploader from "@/modules/upload/public/components/UppyShareUploader.vue";
 import FileList from "@/modules/upload/public/components/FileList.vue";
 import PermissionManager from "@/components/common/PermissionManager.vue";
 import ShareLinkBox from "@/components/common/ShareLinkBox.vue";
@@ -102,8 +104,11 @@ import { useAuthStore } from "@/stores/authStore.js";
 import { useStorageConfigsStore } from "@/stores/storageConfigsStore.js";
 import { useUploadService } from "@/modules/upload/services/uploadService.js";
 import { useGlobalMessage } from "@/composables/core/useGlobalMessage.js";
+import { useThemeMode } from "@/composables/core/useThemeMode.js";
+import { createLogger } from "@/utils/logger.js";
 
 const { t } = useI18n(); // 初始化i18n
+const log = createLogger("UploadView");
 const { getRecentFiles } = useUploadService();
 const { showSuccess, showError, showWarning } = useGlobalMessage();
 
@@ -111,12 +116,7 @@ const { showSuccess, showError, showWarning } = useGlobalMessage();
 const authStore = useAuthStore();
 const { isAdmin, hasFileSharePermission, hasFileManagePermission } = storeToRefs(authStore);
 
-const props = defineProps({
-  darkMode: {
-    type: Boolean,
-    default: false,
-  },
-});
+const { isDarkMode: darkMode } = useThemeMode();
 
 // 数据状态
 const storageConfigsStore = useStorageConfigsStore();
@@ -152,10 +152,7 @@ const navigateToAdmin = () => {
 
 // 权限变化处理 - 当权限状态改变时执行相应的业务逻辑
 const handlePermissionChange = async (hasPermissionValue) => {
-  console.log("FileUpload: 权限状态变化", hasPermissionValue);
-
   if (hasPermissionValue) {
-    console.log("用户获得权限，开始加载配置和文件列表");
     const tasks = [loadStorageConfigs({ force: true })];
     if (canLoadRecentFiles.value) {
       tasks.push(loadFiles());
@@ -164,7 +161,6 @@ const handlePermissionChange = async (hasPermissionValue) => {
     }
     await Promise.all(tasks);
   } else {
-    console.log("用户失去权限，清空数据");
     files.value = [];
     shareResults.value = [];
   }
@@ -181,7 +177,7 @@ const loadStorageConfigs = async (options = {}) => {
       await storageConfigsStore.loadConfigs();
     }
   } catch (error) {
-    console.error("加载存储配置失败:", error);
+    log.error("加载存储配置失败:", error);
   }
 };
 
@@ -197,7 +193,7 @@ const loadFiles = async () => {
     const list = await getRecentFiles(5);
     files.value = list;
   } catch (error) {
-    console.error("加载文件列表失败:", error);
+    log.error("加载文件列表失败:", error);
     showError(`${t("file.messages.getFileDetailFailed")}: ${error.message || t("file.messages.unknownError")}`);
   } finally {
     loadingFiles.value = false;
@@ -211,7 +207,23 @@ const handleUploadSuccess = (fileData) => {
     loadFiles();
   }
 
-  showSuccess(t("file.uploadSuccessful"));
+  // Share 上传页的“预签名秒传/去重”：部分文件可能会被标记为 skipUpload=true（对象已存在，跳过 PUT）
+  const files = Array.isArray(fileData)
+    ? fileData
+    : Array.isArray(fileData?.uploadResults)
+      ? fileData.uploadResults
+      : [];
+
+  const successCount = files.length;
+  const skippedUploadCount = files.filter((item) => item?.meta?.skipUpload === true).length;
+
+  // 文案：单文件/多文件分别用已有 key，跳过上传则追加提示
+  let message = successCount > 1 ? t("file.multipleUploadsSuccessful", { count: successCount }) : t("file.uploadSuccessful");
+  if (skippedUploadCount > 0) {
+    message += `（${t("file.skippedExistingUploads", { count: skippedUploadCount })}）`;
+  }
+
+  showSuccess(message);
 };
 
 const handleShareResults = (results = []) => {
@@ -275,11 +287,7 @@ const handleUploadError = (error) => {
   }
 };
 
-// 组件挂载时初始化
-onMounted(() => {
-  console.log("FileUpload组件已挂载");
-  // 初始化与后续权限变化均通过 PermissionManager 的 permission-change 事件驱动
-});
+// 初始化与后续权限变化均通过 PermissionManager 的 permission-change 事件驱动
 </script>
 
 <style scoped>

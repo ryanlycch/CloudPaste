@@ -1,18 +1,32 @@
 import { ref, reactive, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard.js";
 import { useDeleteSettingsStore } from "@/stores/deleteSettingsStore.js";
 import { useAdminBase } from "@/modules/admin";
 import { generateQRCode as createQRCodeImage } from "@/utils/qrcodeUtils.js";
 import { useFileshareService } from "@/modules/fileshare/fileshareService.js";
 import { useFileShareStore } from "@/modules/fileshare/fileShareStore.js";
+import { createLogger } from "@/utils/logger.js";
+
+const log = createLogger("FileManagement");
 
 /**
  * 文件管理专用composable
  * 基于useAdminBase，添加文件管理特有的逻辑
+ * @param {string} userType - 用户类型 'admin' 或 'apikey'
+ * @param {Object} options - 配置选项
+ * @param {Function} options.confirmFn - 确认对话框函数（必需）
  */
-export function useFileManagement(userType = "admin") {
+export function useFileManagement(userType = "admin", { confirmFn } = {}) {
+  if (!confirmFn) {
+    throw new Error("useFileManagement 必须传入 confirmFn（请在 View 里用 useConfirmDialog + createConfirmFn 创建）");
+  }
   // 继承基础管理功能
-  const base = useAdminBase();
+  const base = useAdminBase("file-management");
+
+  // 国际化
+  const { t } = useI18n();
+
   const fileshareService = useFileshareService();
   const fileShareStore = useFileShareStore();
   // 文件管理特有状态（列表统一由 fileshare store 提供）
@@ -28,13 +42,14 @@ export function useFileManagement(userType = "admin") {
   // 删除设置store
   const deleteSettingsStore = useDeleteSettingsStore();
 
-  // 复制状态跟踪
-  const copiedFiles = reactive({});
-  const copiedPermanentFiles = reactive({});
-
   // 用户类型判断
   const isAdmin = () => userType === "admin";
   const isApiKeyUser = () => userType === "apikey";
+
+  // 搜索状态（服务端搜索）
+  const searchQuery = ref("");
+  const isSearchMode = ref(false);
+  const searchLoading = ref(false);
 
 
 
@@ -52,7 +67,7 @@ export function useFileManagement(userType = "admin") {
         base.updatePagination(pagination, "offset");
         base.updateLastRefreshTime();
       } catch (error) {
-        console.error("加载文件列表失败:", error);
+        log.error("加载文件列表失败:", error);
         base.showError(error.message || "加载数据失败");
         fileShareStore.resetState();
       }
@@ -71,7 +86,13 @@ export function useFileManagement(userType = "admin") {
    * 删除单个文件
    */
   const handleFileDelete = async (file) => {
-    if (!confirm("确定要删除此文件吗？此操作不可恢复。")) {
+    const confirmed = await confirmFn({
+      title: t("common.dialogs.deleteTitle"),
+      message: t("common.dialogs.deleteItem", { name: `"${file.filename}"` }),
+      confirmType: "danger",
+    });
+
+    if (!confirmed) {
       return;
     }
 
@@ -93,7 +114,13 @@ export function useFileManagement(userType = "admin") {
       return;
     }
 
-    if (!confirm(`确定要删除选中的 ${selectedCount} 个文件吗？此操作不可恢复。`)) {
+    const confirmed = await confirmFn({
+      title: t("common.dialogs.deleteTitle"),
+      message: t("common.dialogs.deleteMultiple", { count: selectedCount }),
+      confirmType: "danger",
+    });
+
+    if (!confirmed) {
       return;
     }
 
@@ -107,7 +134,7 @@ export function useFileManagement(userType = "admin") {
           base.showSuccess(`批量删除完成：成功 ${successCount} 个，失败 ${failedCount} 个`);
 
           const failedDetails = failed.map((item) => `ID: ${item.id} - ${item.error}`).join("\n");
-          console.warn("部分文件删除失败:", failedDetails);
+          log.warn("部分文件删除失败:", failedDetails);
         } else if (result?.data && typeof result.data.success === "number") {
           base.showSuccess(`成功删除 ${result.data.success} 个文件`);
         } else {
@@ -125,11 +152,11 @@ export function useFileManagement(userType = "admin") {
    */
   const openEditModal = async (file) => {
     try {
-      const detail = await fileShareStore.fetchById(file.id, { useCache: true });
+      const detail = await fileShareStore.fetchById(file.id, { useCache: false });
       editingFile.value = detail;
       showEdit.value = true;
     } catch (err) {
-      console.error("获取文件详情失败:", err);
+      log.error("获取文件详情失败:", err);
       base.showError(err.message || "获取文件详情失败，请稍后重试");
     }
   };
@@ -146,7 +173,7 @@ export function useFileManagement(userType = "admin") {
         editingFile.value = null;
         await loadFiles();
       } catch (err) {
-        console.error("更新文件信息失败:", err);
+        log.error("更新文件信息失败:", err);
         base.showError(err.message || "更新失败");
       }
     });
@@ -157,11 +184,11 @@ export function useFileManagement(userType = "admin") {
    */
   const openPreviewModal = async (file) => {
     try {
-      const detail = await fileShareStore.fetchById(file.id, { useCache: true });
+      const detail = await fileShareStore.fetchById(file.id, { useCache: false, includeLinks: true });
       previewFile.value = detail;
       showPreview.value = true;
     } catch (err) {
-      console.error("获取文件详情失败:", err);
+      log.error("获取文件详情失败:", err);
       base.showError(err.message || "获取文件详情失败，请稍后重试");
     }
   };
@@ -178,7 +205,7 @@ export function useFileManagement(userType = "admin") {
       qrCodeSlug.value = file.slug;
       showQRCodeModal.value = true;
     } catch (err) {
-      console.error("生成二维码失败:", err);
+      log.error("生成二维码失败:", err);
       base.showError("生成二维码失败");
     }
   };
@@ -202,18 +229,27 @@ export function useFileManagement(userType = "admin") {
     try {
       const fileUrl = fileshareService.buildShareUrl(file, window.location.origin);
 
-      await copyToClipboard(fileUrl);
-
-      // 设置复制状态
-      copiedFiles[file.id] = true;
-      setTimeout(() => {
-        copiedFiles[file.id] = false;
-      }, 2000);
+      const ok = await copyToClipboard(fileUrl);
+      if (ok) {
+        base.showSuccess("分享链接已复制");
+      }
     } catch (err) {
-      console.error("复制链接失败:", err);
+      log.error("复制链接失败:", err);
       // 只在失败时显示错误提示，成功时不显示顶部提示
       base.showError("复制链接失败，请手动复制");
     }
+  };
+
+  /**
+   * 确保文件对象包含 previewUrl/downloadUrl（必要时按需拉取 include=links）
+   * @param {any} file
+   * @returns {Promise<any>}
+   */
+  const ensureLinks = async (file) => {
+    if (!file || !file.id) return file;
+    if (file.previewUrl || file.downloadUrl) return file;
+    const detail = await fileShareStore.fetchById(file.id, { useCache: true, includeLinks: true });
+    return detail || file;
   };
 
   /**
@@ -226,23 +262,17 @@ export function useFileManagement(userType = "admin") {
     }
 
     try {
-      let fileWithUrls = file;
-      if (!fileWithUrls.urls || !fileWithUrls.urls.proxyDownloadUrl) {
-        fileWithUrls = await fileshareService.fetchById(file.id);
-      }
-
-      const permanentDownloadUrl = fileshareService.getPermanentDownloadUrl(fileWithUrls);
+      const detail = await ensureLinks(file);
+      // 使用统一的 Down 路由构造永久下载链接
+      const permanentDownloadUrl = fileshareService.getPermanentDownloadUrl(detail);
       if (!permanentDownloadUrl) {
         throw new Error("无法获取文件的下载链接");
       }
 
       await copyToClipboard(permanentDownloadUrl);
-      copiedPermanentFiles[file.id] = true;
-      setTimeout(() => {
-        copiedPermanentFiles[file.id] = false;
-      }, 2000);
+      base.showSuccess("下载直链已复制");
     } catch (err) {
-      console.error("复制永久链接失败:", err);
+      log.error("复制永久链接失败:", err);
       base.showError(err.message || "复制永久链接失败，请稍后重试");
     }
   };
@@ -256,7 +286,7 @@ export function useFileManagement(userType = "admin") {
     try {
       return await fileshareService.getOfficePreviewUrl(file);
     } catch (error) {
-      console.error("获取Office预览URL失败:", error);
+      log.error("获取Office预览URL失败:", error);
       base.showError(`预览失败: ${error.message}`);
       return null;
     }
@@ -272,16 +302,12 @@ export function useFileManagement(userType = "admin") {
     }
 
     try {
+      const detail = await ensureLinks(file);
       // 检查是否为Office文件
       const { FileType } = await import("@/utils/fileTypes.js");
-      if (file.type === FileType.OFFICE) {
-        console.log("检测到Office文件，使用专用预览", {
-          filename: file.filename,
-          mimetype: file.mimetype,
-        });
-
+      if (detail.type === FileType.OFFICE) {
         // 获取Office预览URL
-        const officePreviewUrl = await getOfficePreviewUrl(file);
+        const officePreviewUrl = await getOfficePreviewUrl(detail);
         if (officePreviewUrl) {
           window.open(officePreviewUrl, "_blank");
         }
@@ -289,10 +315,13 @@ export function useFileManagement(userType = "admin") {
       }
 
       // 非Office文件使用普通预览方式
-      const previewUrl = getPermanentViewUrl(file);
+      const previewUrl = getPermanentViewUrl(detail);
+      if (!previewUrl) {
+        throw new Error("无法获取文件的预览链接");
+      }
       window.open(previewUrl, "_blank");
     } catch (err) {
-      console.error("预览文件失败:", err);
+      log.error("预览文件失败:", err);
       base.showError("预览文件失败，请稍后重试");
     }
   };
@@ -300,7 +329,7 @@ export function useFileManagement(userType = "admin") {
   /**
    * 下载文件
    */
-  const downloadFileDirectly = (file) => {
+  const downloadFileDirectly = async (file) => {
     try {
       // 检查是否有永久下载链接
       if (!file.slug) {
@@ -308,12 +337,18 @@ export function useFileManagement(userType = "admin") {
         return;
       }
 
+      const detail = await ensureLinks(file);
+
       // 提取文件名，用于下载时的文件命名
-      const fileName = file.filename || "下载文件";
+      const fileName = detail.filename || "下载文件";
 
       // 创建一个隐藏的a标签
       const link = document.createElement("a");
-      link.href = getPermanentDownloadUrl(file);
+      const downloadUrl = getPermanentDownloadUrl(detail);
+      if (!downloadUrl) {
+        throw new Error("无法获取文件的下载链接");
+      }
+      link.href = downloadUrl;
       link.download = fileName; // 设置下载文件名
       link.setAttribute("target", "_blank"); // 在新窗口打开
       document.body.appendChild(link);
@@ -326,10 +361,15 @@ export function useFileManagement(userType = "admin") {
         document.body.removeChild(link);
       }, 100);
     } catch (err) {
-      console.error("下载文件失败:", err);
+      log.error("下载文件失败:", err);
       // 如果直接下载失败，尝试在新窗口打开下载链接
       if (file.slug) {
-        window.open(getPermanentDownloadUrl(file), "_blank");
+        try {
+          const detail = await ensureLinks(file);
+          window.open(getPermanentDownloadUrl(detail), "_blank");
+        } catch {
+          window.open(getPermanentDownloadUrl(file), "_blank");
+        }
       } else {
         window.open(file.publicUrl || "", "_blank");
       }
@@ -372,11 +412,94 @@ export function useFileManagement(userType = "admin") {
         });
         return { files: results, pagination };
       } catch (error) {
-        console.error("搜索文件失败:", error);
+        log.error("搜索文件失败:", error);
         base.showError(error.message || "搜索失败");
         return { files: [], pagination: { total: 0, limit: base.pagination.limit, offset: searchOffset } };
       }
     });
+  };
+
+  /**
+   * 处理全局搜索（服务端）
+   * - 规则：少于 2 个字视为“未搜索”
+   */
+  const handleGlobalSearch = async (value) => {
+    searchQuery.value = value;
+
+    if (!value || value.trim().length < 2) {
+      await clearSearch();
+      return;
+    }
+
+    try {
+      searchLoading.value = true;
+      isSearchMode.value = true;
+
+      base.resetPagination();
+      const result = await searchFiles(value.trim(), 0);
+      base.updatePagination(result.pagination || { total: files.value.length, limit: base.pagination.limit, offset: 0 }, "offset");
+      base.updateLastRefreshTime();
+    } finally {
+      searchLoading.value = false;
+    }
+  };
+
+  /**
+   * 清除搜索，回到正常分页列表
+   */
+  const clearSearch = async () => {
+    searchQuery.value = "";
+    isSearchMode.value = false;
+    base.resetPagination();
+    await loadFiles();
+  };
+
+  /**
+   * 分页变化（支持搜索模式）
+   */
+  const handleOffsetChangeWithSearch = async (newOffset) => {
+    if (isSearchMode.value && searchQuery.value) {
+      try {
+        searchLoading.value = true;
+        const result = await searchFiles(searchQuery.value, newOffset);
+        base.updatePagination(result.pagination || { total: files.value.length, limit: base.pagination.limit, offset: newOffset }, "offset");
+      } finally {
+        searchLoading.value = false;
+      }
+      return;
+    }
+
+    handleOffsetChange(newOffset);
+  };
+
+  /**
+   * 每页数量变化（支持搜索模式）
+   */
+  const handlePageSizeChange = async (newPageSize) => {
+    base.changePageSize(newPageSize);
+    if (isSearchMode.value && searchQuery.value) {
+      await handleGlobalSearch(searchQuery.value);
+      return;
+    }
+    await loadFiles();
+  };
+
+  /**
+   * 刷新当前列表（保持搜索/分页状态）
+   */
+  const refreshFiles = async () => {
+    if (isSearchMode.value && searchQuery.value) {
+      try {
+        searchLoading.value = true;
+        const result = await searchFiles(searchQuery.value, base.pagination.offset);
+        base.updatePagination(result.pagination || { total: files.value.length, limit: base.pagination.limit, offset: base.pagination.offset }, "offset");
+        base.updateLastRefreshTime();
+      } finally {
+        searchLoading.value = false;
+      }
+      return;
+    }
+    await loadFiles();
   };
 
 /**
@@ -396,6 +519,11 @@ export function useFileManagement(userType = "admin") {
     // 继承基础功能
     ...base,
 
+    // 搜索状态
+    searchQuery,
+    isSearchMode,
+    searchLoading,
+
     // 文件管理特有状态
     files,
     editingFile,
@@ -405,13 +533,16 @@ export function useFileManagement(userType = "admin") {
     showQRCodeModal,
     qrCodeDataURL,
     qrCodeSlug,
-    copiedFiles,
-    copiedPermanentFiles,
 
     // 文件管理方法
     loadFiles,
+    refreshFiles,
     searchFiles,
     handleOffsetChange,
+    handleGlobalSearch,
+    clearSearch,
+    handleOffsetChangeWithSearch,
+    handlePageSizeChange,
     handleFileDelete,
     handleBatchDelete,
     openEditModal,

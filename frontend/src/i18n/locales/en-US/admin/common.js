@@ -32,6 +32,7 @@ export default {
   permissionDenied: {
     title: "Permission Denied",
   },
+  administrator: "Administrator",
   title: {
     admin: "Admin Panel",
     user: "User Panel",
@@ -43,8 +44,12 @@ export default {
     storageConfig: "Storage Management",
     mountManagement: "Mount Management",
     fsMetaManagement: "Meta Management",
+    fsIndexManagement: "Index Management",
     keyManagement: "Key Management",
     backup: "Data Backup",
+    taskManagement: "Task Management",
+    tasks: "Tasks",
+    scheduledJobs: "Scheduled Jobs",
     systemSettings: "System Settings",
     globalSettings: "Global Settings",
     previewSettings: "Preview Settings",

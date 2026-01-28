@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { useFileshareService } from "@/modules/fileshare/fileshareService.js";
+import { createLogger } from "@/utils/logger.js";
 
 /** @typedef {import("@/types/fileshare").FileshareItem} FileshareItem */
 /** @typedef {import("@/types/api").PaginationInfo} PaginationInfo */
@@ -14,6 +15,7 @@ import { useFileshareService } from "@/modules/fileshare/fileshareService.js";
  */
 export const useFileShareStore = defineStore("fileShare", () => {
   const service = useFileshareService();
+  const log = createLogger("FileShareStore");
 
   /** @type {import("vue").Ref<FileshareItem[]>} */
   const items = ref([]);
@@ -85,7 +87,7 @@ export const useFileShareStore = defineStore("fileShare", () => {
 
       return { files, pagination: mergedPagination };
     } catch (e) {
-      console.error("加载文件分享列表失败:", e);
+      log.error("加载文件分享列表失败:", e);
       error.value = /** @type {any} */ (e)?.message || "加载文件分享列表失败";
       items.value = [];
       throw e;
@@ -101,19 +103,23 @@ export const useFileShareStore = defineStore("fileShare", () => {
   /**
    * 根据 ID 获取文件（带缓存）
    * @param {number|string} id
-   * @param {{useCache?:boolean}} [options]
+   * @param {{useCache?:boolean, includeLinks?:boolean}} [options]
    * @returns {Promise<FileshareItem | null>}
    */
-  const fetchById = async (id, { useCache = true } = {}) => {
+  const fetchById = async (id, { useCache = true, includeLinks = false } = {}) => {
     if (!id) {
       throw new Error("缺少文件 ID");
     }
 
     if (useCache && cacheById.value.has(id)) {
-      return cacheById.value.get(id) || null;
+      const cached = cacheById.value.get(id) || null;
+      const hasLinks = !!(cached && (cached.previewUrl || cached.downloadUrl));
+      if (!includeLinks || hasLinks) {
+        return cached;
+      }
     }
 
-    const file = await service.fetchById(id);
+    const file = await service.fetchById(id, includeLinks ? { includeLinks: true } : {});
     if (file) {
       if (file.id != null) {
         cacheById.value.set(file.id, file);
@@ -240,4 +246,3 @@ export const useFileShareStore = defineStore("fileShare", () => {
     resetState,
   };
 });
-

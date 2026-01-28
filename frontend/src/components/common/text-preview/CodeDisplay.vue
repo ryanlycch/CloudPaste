@@ -2,8 +2,12 @@
   <div class="code-display" :class="{ 'code-display-dark': darkMode }">
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-state">
-      <div class="loading-spinner"></div>
-      <p class="loading-text">{{ $t("textPreview.loadingHighlight") }}</p>
+      <LoadingIndicator
+        :text="$t('textPreview.loadingHighlight')"
+        :dark-mode="darkMode"
+        size="xl"
+        :icon-class="darkMode ? 'text-primary-500' : 'text-primary-600'"
+      />
     </div>
     <!-- 错误状态 -->
     <div v-else-if="error" class="error-state">
@@ -19,8 +23,11 @@
 import { ref, computed, watch, watchEffect, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { useCodeHighlight } from "@/composables/text-preview/useCodeHighlight.js";
+import LoadingIndicator from "@/components/common/LoadingIndicator.vue";
+import { createLogger } from "@/utils/logger.js";
 
 const { t } = useI18n();
+const log = createLogger("CodeDisplay");
 
 // Props
 const props = defineProps({
@@ -92,7 +99,7 @@ const renderCode = async () => {
       throw new Error(result.error || "Code highlighting failed");
     }
   } catch (err) {
-    console.error("代码高亮渲染失败:", err);
+    log.error("代码高亮渲染失败:", err);
     error.value = err.message;
 
     // 降级显示原始代码
@@ -225,10 +232,6 @@ watchEffect(() => {
   justify-content: center;
   padding: 2rem;
   min-height: 200px;
-}
-
-.loading-spinner {
-  @apply w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-2;
 }
 
 .loading-text,
